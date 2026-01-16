@@ -77,5 +77,82 @@ class CampusGraph:
     def _create_campus_edges(self) -> List[Tuple[int, int]]:
         """Create edges that follow pathways and avoid buildings."""
         edges = []
-
-# TODO: finish osm graph helpers
+        grid_size = 15
+        
+        # Connect adjacent nodes (4-connected grid) avoiding buildings
+        for i in range(grid_size):
+            for j in range(grid_size):
+                node_id = i * grid_size + j
+                lat1, lon1 = self.nodes[node_id]
+                
+                # Right neighbor
+                if j < grid_size - 1:
+                    neighbor = node_id + 1
+                    lat2, lon2 = self.nodes[neighbor]
+                    if not self._is_path_blocked(lat1, lon1, lat2, lon2):
+                        edges.append((node_id, neighbor))
+                
+                # Bottom neighbor
+                if i < grid_size - 1:
+                    neighbor = node_id + grid_size
+                    lat2, lon2 = self.nodes[neighbor]
+                    if not self._is_path_blocked(lat1, lon1, lat2, lon2):
+                        edges.append((node_id, neighbor))
+                
+                # Add some diagonal connections for more path options
+                # But only where they make sense (not cutting through buildings)
+                if i < grid_size - 1 and j < grid_size - 1:
+                    neighbor = node_id + grid_size + 1
+                    lat2, lon2 = self.nodes[neighbor]
+                    if not self._is_path_blocked(lat1, lon1, lat2, lon2) and np.random.random() > 0.3:
+                        edges.append((node_id, neighbor))
+                
+                if i < grid_size - 1 and j > 0:
+                    neighbor = node_id + grid_size - 1
+                    lat2, lon2 = self.nodes[neighbor]
+                    if not self._is_path_blocked(lat1, lon1, lat2, lon2) and np.random.random() > 0.3:
+                        edges.append((node_id, neighbor))
+        
+        return edges
+    
+    def _create_spatial_data(self) -> Dict[Tuple[int, int], Dict]:
+        """Create spatial attributes for each edge with realistic variations."""
+        spatial_data = {}
+        
+        for edge in self.edges:
+            n1, n2 = edge
+            lat1, lon1 = self.nodes[n1]
+            lat2, lon2 = self.nodes[n2]
+            
+            # Calculate edge properties
+            orientation = self._calculate_orientation(lat1, lon1, lat2, lon2)
+            
+            # Check proximity to buildings for tree density
+            # Paths near buildings have fewer trees
+            min_building_dist = min(
+                math.sqrt((lat1 - b_lat)**2 + (lon1 - b_lon)**2)
+                for b_lat, b_lon, _ in self.buildings
+            ) if self.buildings else 1.0
+            
+            # Paths far from buildings have more trees
+            if min_building_dist > 0.001:
+                tree_density = np.random.beta(3, 2)  # More trees
+            else:
+                tree_density = np.random.beta(2, 5)  # Fewer trees near buildings
+            
+            # Building proximity based on closest building
+            building_proximity = max(0, 1 - min_building_dist * 500)
+            building_proximity = min(1, building_proximity)
+            
+            spatial_data[edge] = {
+                'orientation': orientation,
+                'tree_density': tree_density,
+                'building_proximity': building_proximity
+            }
+        
+        return spatial_data
+    
+    def _calculate_orientation(self, lat1: float, lon1: float, 
+                              lat2: float, lon2: float) -> float:
+        """Calculate orientation of path segment in degrees."""
+        dx = lon2 - lon1

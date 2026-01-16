@@ -17,4 +17,18 @@ class RouteRequest(BaseModel):
     optimize_for: str = Field(default="shade", pattern="^(shade|speed)$")
     shade_weight: float = Field(default=0.7, ge=0, le=1, description="Weight for shade vs distance")
 
-# more fields later
+class RouteSegment(BaseModel):
+    """Single segment of a route."""
+    start: Location
+    end: Location
+    distance: float
+    shade_probability: float
+    orientation: float
+
+class RouteResponse(BaseModel):
+    """Response containing computed route."""
+    segments: List[RouteSegment]
+    total_distance: float
+    average_shade: float
+    total_time_minutes: float
+    path_coordinates: List[List[float]]  # [[lat, lon], ...]
