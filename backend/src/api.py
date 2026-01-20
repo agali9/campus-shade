@@ -238,4 +238,73 @@ async def debug_nodes():
         raise HTTPException(status_code=503, detail="Routing service not initialized.")
     return route_service.debug_nodes_geojson()
 
-# routing endpoints WIP
+
+@app.get("/debug/graph")
+async def debug_graph():
+    if route_service is None:
+        raise HTTPException(status_code=503, detail="Routing service not initialized.")
+    return route_service.debug_graph_geojson()
+
+
+@app.get("/debug/shadows")
+async def debug_shadows(
+    hour: float = Query(12.0, description="Hour of day (0-24)"),
+    day: int = Query(180, description="Day of year (0-365)"),
+    min_lat: Optional[float] = None,
+    max_lat: Optional[float] = None,
+    min_lon: Optional[float] = None,
+    max_lon: Optional[float] = None,
+):
+    return await get_shadows(hour=hour, day=day, min_lat=min_lat, max_lat=max_lat, min_lon=min_lon, max_lon=max_lon)
+
+
+@app.get("/debug/edge_shade")
+async def debug_edge_shade(
+    edge_id: str = Query(..., description="Edge id in format u|v|k"),
+    hour: float = Query(12.0, description="Hour of day (0-24)"),
+    day: int = Query(172, description="Day of year (0-365)"),
+):
+    if route_service is None or route_service.graph is None:
+        raise HTTPException(status_code=503, detail="Routing service not initialized.")
+    def _coerce_node(node_val: str):
+        if node_val.lstrip("-").isdigit():
+            try:
+                return int(node_val)
+            except ValueError:
+                return node_val
+        return node_val
+
+    try:
+        u_raw, v_raw, k_raw = edge_id.split("|")
+        u = _coerce_node(u_raw)
+        v = _coerce_node(v_raw)
+        k = int(k_raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="edge_id must be u|v|k") from exc
+
+    graph = route_service.graph
+    if not graph.has_edge(u, v, k):
+        raise HTTPException(status_code=404, detail=f"Edge {edge_id} not found in graph")
+
+    tz = pytz.timezone("America/Phoenix")
+    dt = datetime(2024, 1, 1, tzinfo=tz) + timedelta(days=day, hours=hour)
+    shadow_cache_key = f"{day}_{hour:.1f}_full"
+    shadow_union = SHADOW_UNION_CACHE.get(shadow_cache_key)
+    if shadow_union is None:
+        shadow_polygons = shadow_calc.calculate_shadow_polygons(ALL_BUILDINGS, dt)
+        shadow_union = unary_union(shadow_polygons) if shadow_polygons else None
+        SHADOW_UNION_CACHE[shadow_cache_key] = shadow_union
+
+    edge_data = dict(graph.get_edge_data(u, v, k))
+    edge_geom_wgs84 = route_service.edge_geometry_data(graph, u, v, edge_data)
+    edge_geom_utm = transform(building_loader.project_to_utm, edge_geom_wgs84)
+    shade_fraction = (
+        shadow_calc.calculate_street_shade(edge_geom_utm, shadow_union)
+        if shadow_union is not None and not shadow_union.is_empty
+        else 0.0
+    )
+    return {
+        "edge_id": edge_id,
+        "shade_fraction": float(max(0.0, min(1.0, shade_fraction))),
+        "time_of_day": hour,
+        "day_of_year": day,

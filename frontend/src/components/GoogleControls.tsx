@@ -199,3 +199,175 @@ export const GoogleControls: React.FC<GoogleControlsProps> = ({
             borderRadius: '10px',
             marginBottom: '16px'
           }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '12px'
+            }}>
+              <label style={{
+                fontSize: '13px',
+                fontWeight: 500,
+                color: '#374151',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}>
+                <span>≡ƒòÉ</span> Time of Day
+              </label>
+              <span style={{
+                fontSize: '14px',
+                fontWeight: 600,
+                color: '#4f46e5',
+                backgroundColor: 'white',
+                padding: '4px 12px',
+                borderRadius: '6px',
+                border: '1px solid #e0e7ff'
+              }}>
+                {timeOfDay.toFixed(1)}:00
+              </span>
+            </div>
+            <input
+              type="range"
+              min="6"
+              max="20"
+              step="0.5"
+              value={timeOfDay}
+              onChange={(e) => onTimeChange(parseFloat(e.target.value))}
+              style={{
+                width: '100%',
+                height: '6px',
+                borderRadius: '3px',
+                outline: 'none',
+                background: `linear-gradient(to right, #4f46e5 0%, #4f46e5 ${((timeOfDay - 6) / 14) * 100}%, #e5e7eb ${((timeOfDay - 6) / 14) * 100}%, #e5e7eb 100%)`
+              }}
+            />
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              marginTop: '8px',
+              fontSize: '11px',
+              color: '#9ca3af',
+              fontWeight: 500
+            }}>
+              <span>6 AM</span>
+              <span>Noon</span>
+              <span>8 PM</span>
+            </div>
+          </div>
+
+          {/* Shade Route Toggle */}
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '14px 16px',
+            backgroundColor: showShadeRoute ? '#f0fdf4' : '#fafafa',
+            border: `1.5px solid ${showShadeRoute ? '#86efac' : '#e5e7eb'}`,
+            borderRadius: '10px',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            marginBottom: '20px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '18px' }}>≡ƒî│</span>
+              <span style={{
+                fontSize: '14px',
+                fontWeight: 500,
+                color: showShadeRoute ? '#166534' : '#374151'
+              }}>
+                Show shade-optimized route
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={showShadeRoute}
+              onChange={(e) => onShowShadeRouteChange(e.target.checked)}
+              style={{
+                width: '20px',
+                height: '20px',
+                cursor: 'pointer',
+                accentColor: '#10b981'
+              }}
+            />
+          </label>
+
+          {/* Action Buttons */}
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={onComputeRoute}
+              disabled={!canCompute || isComputing}
+              style={{
+                flex: 1,
+                padding: '14px 20px',
+                backgroundColor: canCompute && !isComputing ? '#4f46e5' : '#d1d5db',
+                color: 'white',
+                border: 'none',
+                borderRadius: '10px',
+                fontSize: '15px',
+                fontWeight: 600,
+                cursor: canCompute && !isComputing ? 'pointer' : 'not-allowed',
+                transition: 'all 0.2s',
+                boxShadow: canCompute && !isComputing ? '0 4px 6px -1px rgba(79, 70, 229, 0.3)' : 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px'
+              }}
+              onMouseEnter={(e) => {
+                if (canCompute && !isComputing) {
+                  e.currentTarget.style.backgroundColor = '#4338ca';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(79, 70, 229, 0.4)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (canCompute && !isComputing) {
+                  e.currentTarget.style.backgroundColor = '#4f46e5';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(79, 70, 229, 0.3)';
+                }
+              }}
+            >
+              {isComputing ? (
+                <>
+                  <div style={{
+                    width: '16px',
+                    height: '16px',
+                    border: '2px solid white',
+                    borderTopColor: 'transparent',
+                    borderRadius: '50%',
+                    animation: 'spin 0.8s linear infinite'
+                  }}></div>
+                  Computing...
+                </>
+              ) : (
+                <>
+                  <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                  </svg>
+                  Get Directions
+                </>
+              )}
+            </button>
+            <button
+              onClick={onReset}
+              style={{
+                padding: '14px 18px',
+                backgroundColor: 'white',
+                color: '#6b7280',
+                border: '1.5px solid #e5e7eb',
+                borderRadius: '10px',
+                fontSize: '15px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#f9fafb';
+                e.currentTarget.style.borderColor = '#d1d5db';
+                e.currentTarget.style.color = '#374151';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'white';
+                e.currentTarget.style.borderColor = '#e5e7eb';

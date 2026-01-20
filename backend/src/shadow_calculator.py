@@ -184,3 +184,43 @@ class ShadowCalculator:
     ) -> float:
         """
         Calculate shade fraction for a street segment.
+        
+        Args:
+            street_line: Street/path LineString
+            shadow_polygon: Combined shadow polygon
+            
+        Returns:
+            Shade fraction (0-1)
+        """
+        try:
+            # Intersect street with shadow
+            intersection = street_line.intersection(shadow_polygon)
+            
+            # Calculate shaded length
+            if intersection.is_empty:
+                return 0.0
+            
+            if isinstance(intersection, (LineString, MultiPolygon)):
+                shaded_length = intersection.length
+            elif hasattr(intersection, '__iter__'):
+                shaded_length = sum(geom.length for geom in intersection.geoms)
+            else:
+                shaded_length = 0.0
+            
+            # Calculate fraction
+            total_length = street_line.length
+            if total_length == 0:
+                return 0.0
+            
+            shade_fraction = min(shaded_length / total_length, 1.0)
+            return shade_fraction
+            
+        except Exception as e:
+            print(f"Error calculating street shade: {e}")
+            return 0.0
+
+
+# Example usage and testing
+if __name__ == "__main__":
+    print("Shadow Calculator Test\n" + "="*50)
+    
