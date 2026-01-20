@@ -148,3 +148,85 @@ function App() {
       alert('Failed to compute routes. Please ensure:\n1. Google Maps API key is valid\n2. Backend server is running\n3. Locations are accessible by walking');
     } finally {
       setIsComputing(false);
+    }
+  };
+
+  if (!apiKey) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-100">
+        <div className="bg-white p-8 rounded-lg shadow-lg max-w-md">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Configuration Required</h1>
+          <p className="text-gray-700 mb-4">
+            Google Maps API key is missing. Please:
+          </p>
+          <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600 mb-4">
+            <li>Get an API key from Google Cloud Console</li>
+            <li>Create a file: <code className="bg-gray-100 px-2 py-1 rounded">frontend/.env</code></li>
+            <li>Add: <code className="bg-gray-100 px-2 py-1 rounded">VITE_GOOGLE_MAPS_API_KEY=your_key</code></li>
+            <li>Restart the development server</li>
+          </ol>
+          <p className="text-xs text-gray-500">
+            See GOOGLE_MAPS_SETUP.md for detailed instructions.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative h-screen w-screen">
+      <GoogleMapComponent
+        apiKey={apiKey}
+        startLocation={startLocation}
+        endLocation={endLocation}
+        googleRoute={googleRoute}
+        shadedPath={shadedPath}
+        onMapClick={handleMapClick}
+        center={center}
+      />
+      
+      <GoogleControls
+        startAddress={startAddress}
+        endAddress={endAddress}
+        timeOfDay={timeOfDay}
+        showShadeRoute={showShadeRoute}
+        onStartSelect={handleStartSelect}
+        onEndSelect={handleEndSelect}
+        onSwapLocations={handleSwapLocations}
+        onTimeChange={setTimeOfDay}
+        onShowShadeRouteChange={setShowShadeRoute}
+        onComputeRoute={handleComputeRoute}
+        onReset={handleReset}
+        isComputing={isComputing}
+        googleRouteInfo={googleRouteInfo}
+        shadedRouteInfo={shadedRouteInfo}
+      />
+
+      {/* Professional Legend */}
+      {(googleRoute || shadedPath) && (
+        <div style={{
+          position: 'fixed',
+          bottom: '32px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+          padding: '16px 24px',
+          pointerEvents: 'none',
+          border: '1px solid #f3f4f6'
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '24px'
+          }}>
+            {googleRoute && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}>
+                <div style={{
+                  width: '32px',

@@ -117,5 +117,70 @@ class ShadowCalculator:
         shadow_coords = list(shadow_footprint.exterior.coords)
         
         # Create quadrilaterals for each edge
-
-# expand shadow union later
+        shadow_parts = []
+        for i in range(len(building_coords) - 1):
+            quad = Polygon([
+                building_coords[i],
+                building_coords[i + 1],
+                shadow_coords[i + 1],
+                shadow_coords[i]
+            ])
+            shadow_parts.append(quad)
+        
+        # Also include the translated building footprint
+        shadow_parts.append(shadow_footprint)
+        
+        # Union all parts
+        try:
+            shadow = unary_union(shadow_parts)
+            return shadow
+        except:
+            return None
+    
+    def calculate_all_shadows(
+        self,
+        buildings: List[Dict],
+        dt: datetime
+    ) -> Polygon:
+        """
+        Calculate combined shadow from all buildings.
+        
+        Args:
+            buildings: List of dicts with 'polygon' and 'height' keys
+            dt: DateTime for sun position
+            
+        Returns:
+            Union of all shadows as a single polygon
+        """
+        # Get sun position
+        azimuth, elevation = self.get_sun_position(dt)
+        
+        print(f"Sun position at {dt}: azimuth={azimuth:.1f}┬░, elevation={elevation:.1f}┬░")
+        
+        # Calculate individual shadows
+        shadows = []
+        for building in buildings:
+            shadow = self.calculate_shadow_polygon(
+                building['polygon'],
+                building['height'],
+                azimuth,
+                elevation
+            )
+            if shadow:
+                shadows.append(shadow)
+        
+        # Union all shadows
+        if shadows:
+            combined = unary_union(shadows)
+            print(f"Calculated {len(shadows)} building shadows")
+            return combined
+        else:
+            return Polygon()  # Empty polygon
+    
+    def calculate_street_shade(
+        self,
+        street_line: LineString,
+        shadow_polygon: Polygon
+    ) -> float:
+        """
+        Calculate shade fraction for a street segment.

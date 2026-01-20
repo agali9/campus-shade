@@ -45,3 +45,24 @@ export class ApiService {
 
   static async getGoogleDirections(
     start: { lat: number; lng: number },
+    end: { lat: number; lng: number },
+    directionsService: google.maps.DirectionsService
+  ): Promise<google.maps.DirectionsResult> {
+    return new Promise((resolve, reject) => {
+      directionsService.route(
+        {
+          origin: start,
+          destination: end,
+          travelMode: google.maps.TravelMode.WALKING,
+        },
+        (result, status) => {
+          if (status === 'OK' && result) {
+            resolve(result);
+          } else {
+            reject(new Error(`Directions request failed: ${status}`));
+          }
+        }
+      );
+    });
+  }
+}

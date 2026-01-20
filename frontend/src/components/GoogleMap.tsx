@@ -87,3 +87,48 @@ export const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
     >
       <GoogleMap
         mapContainerStyle={mapContainerStyle}
+        center={center || defaultCenter}
+        zoom={14}
+        onLoad={onLoad}
+        onUnmount={onUnmount}
+        onClick={handleMapClick}
+        options={mapOptions}
+      >
+        {/* Start Marker */}
+        {startLocation && (
+          <Marker
+            position={{ lat: startLocation.lat, lng: startLocation.lon }}
+            label="A"
+            icon={{
+              url: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png'
+            }}
+          />
+        )}
+
+        {/* End Marker */}
+        {endLocation && (
+          <Marker
+            position={{ lat: endLocation.lat, lng: endLocation.lon }}
+            label="B"
+            icon={{
+              url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+            }}
+          />
+        )}
+
+        {/* Google Directions Route (Fastest) */}
+        {googleRoute && (
+          <DirectionsRenderer
+            directions={googleRoute}
+            options={{
+              polylineOptions: {
+                strokeColor: '#4285F4',
+                strokeWeight: 5,
+                strokeOpacity: 0.8
+              },
+              suppressMarkers: true
+            }}
+          />
+        )}
+
+        {/* Shade-Optimized Route */}
