@@ -26,3 +26,22 @@ export interface RouteResponse {
   total_distance: number;
   average_shade: number;
   total_time_minutes: number;
+  path_coordinates: [number, number][];
+  polyline_coordinates: [number, number][];
+  edge_geometries: [number, number][][];
+  edge_ids: string[];
+  comparison?: {
+    fastest_distance: number;
+    fastest_shade: number;
+    shade_route_distance: number;
+    shade_route_shade: number;
+  };
+  fastest_segments?: RouteSegment[];
+}
+
+export interface CampusBounds {
+  min_lat: number;
+  max_lat: number;
+  min_lon: number;
+  max_lon: number;
+  center: {

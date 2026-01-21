@@ -183,3 +183,50 @@ function App() {
     setShadedPath(null);
     setGoogleRouteInfo(null);
     setShadedRouteInfo(null);
+  };
+
+  const handleReset = () => {
+    setStartLocation(null);
+    setEndLocation(null);
+    setStartAddress('');
+    setEndAddress('');
+    clearRoutes();
+  };
+
+  const handleComputeRoute = async () => {
+    if (!startLocation || !endLocation) {
+      alert('⚠️ Please select both start and end locations on the map or use the search boxes.');
+      return;
+    }
+    
+    setGoogleRoute(null);
+    setShadedPath(null);
+    setGoogleRouteInfo(null);
+    setShadedRouteInfo(null);
+    
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    setIsComputing(true);
+
+    try {
+      const backendHealthy = await ApiService.checkBackendHealth();
+      if (!backendHealthy) {
+        throw new Error('Backend server is not responding. Please ensure it is running at http://localhost:8000');
+      }
+
+      let directionsServiceToUse = directionsService;
+      if (!directionsServiceToUse && window.google?.maps) {
+        directionsServiceToUse = new google.maps.DirectionsService();
+        setDirectionsService(directionsServiceToUse);
+      }
+      
+      if (!directionsServiceToUse) {
+        throw new Error('Google Maps is not yet initialized. Please wait a moment and try again.');
+      }
+
+      const googleDirectionsPromise = ApiService.getGoogleDirections(
+        { lat: startLocation.lat, lng: startLocation.lon },
+        { lat: endLocation.lat, lng: endLocation.lon },
+        directionsServiceToUse
+      );
+      const shadeRoutePromise = showShadeRoute

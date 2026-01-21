@@ -308,3 +308,71 @@ async def debug_edge_shade(
         "shade_fraction": float(max(0.0, min(1.0, shade_fraction))),
         "time_of_day": hour,
         "day_of_year": day,
+        "edge_length_m": float(edge_geom_utm.length),
+    }
+
+
+@app.get("/benchmark")
+async def benchmark(iterations: int = Query(1000, ge=10, le=5000)):
+    if route_service is None:
+        raise HTTPException(status_code=503, detail="Routing service not initialized.")
+    results = route_service.benchmark(iterations=iterations)
+    return {"iterations": iterations, **results}
+
+
+@app.get("/profile/route")
+async def profile_route():
+    if route_service is None or route_service.graph is None:
+        raise HTTPException(status_code=503, detail="Routing service not initialized.")
+    nodes = list(route_service.graph.nodes())
+    if len(nodes) < 2:
+        raise HTTPException(status_code=500, detail="Insufficient graph nodes")
+    start_node = nodes[0]
+    end_node = nodes[-1]
+    pr = cProfile.Profile()
+    pr.enable()
+    _ = route_service.route(
+        start_lat=float(route_service.graph.nodes[start_node]["y"]),
+        start_lon=float(route_service.graph.nodes[start_node]["x"]),
+        end_lat=float(route_service.graph.nodes[end_node]["y"]),
+        end_lon=float(route_service.graph.nodes[end_node]["x"]),
+        shade_weight=0.7,
+        day_of_year=180,
+        departure_minutes=12 * 60,
+        shadow_polygon_utm=None,
+        building_loader=building_loader,
+        shadow_calc=shadow_calc,
+        time_aware=False,
+    )
+    pr.disable()
+    stream = io.StringIO()
+    pstats.Stats(pr, stream=stream).sort_stats("cumulative").print_stats(20)
+    return {"top_profile": stream.getvalue()}
+
+
+@app.post("/shade/precompute")
+async def precompute_shade_index(day_of_year: int = Query(180, ge=0, le=365)):
+    if route_service.graph is None:
+        raise HTTPException(status_code=503, detail="Routing graph unavailable")
+    route_store.precompute_shade_index(
+        route_service.graph,
+        day_of_year=day_of_year,
+        shadow_calc=shadow_calc,
+        buildings_utm=ALL_BUILDINGS,
+        building_loader=building_loader,
+    )
+    return {"status": "ok", "day_of_year": day_of_year}
+
+
+@app.get("/sun")
+async def get_sun_position(
+    hour: float = Query(12.0, description="Hour of day (0-24)"),
+    day: int = Query(180, description="Day of year (0-365)")
+):
+    try:
+        tz = pytz.timezone('America/Phoenix')
+        year = 2024
+        base_date = datetime(year, 1, 1, tzinfo=tz)
+        dt = base_date + timedelta(days=day, hours=hour)
+        
+        azimuth, elevation = shadow_calc.get_sun_position(dt)

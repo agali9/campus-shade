@@ -1,4 +1,4 @@
-import { RouteRequest, RouteResponse, CampusBounds } from '../types';
+import { RouteRequest, RouteResponse, CampusBounds, Location } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -12,19 +12,38 @@ export class ApiService {
   }
 
   static async computeRoute(request: RouteRequest): Promise<RouteResponse> {
-    const response = await fetch(`${API_BASE_URL}/route`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-    });
+    try {
+      const response = await fetch(`${API_BASE_URL}/route`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      });
 
-    if (!response.ok) {
-      throw new Error('Failed to compute route');
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = 'Failed to compute route';
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.detail || errorMessage;
+        } catch {
+          errorMessage = errorText || errorMessage;
+        }
+        
+        console.error('Route computation failed:', errorMessage);
+        throw new Error(errorMessage);
+      }
+
+      return response.json();
+    } catch (error) {
+      console.error('Route computation error:', error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error('Failed to compute route - check if backend is running');
     }
-
-    return response.json();
   }
 
   static async computeShadeOptimizedRoute(
@@ -40,6 +59,24 @@ export class ApiService {
       day_of_year: dayOfYear,
       optimize_for: 'shade',
       shade_weight: 0.7,
+    });
+  }
+
+  static async computeRouteWithWaypoints(
+    start: { lat: number; lon: number },
+    end: { lat: number; lon: number },
+    waypoints: Location[],
+    timeOfDay: number,
+    dayOfYear: number = 180
+  ): Promise<RouteResponse> {
+    return this.computeRoute({
+      start,
+      end,
+      time_of_day: timeOfDay,
+      day_of_year: dayOfYear,
+      optimize_for: 'shade',
+      shade_weight: 0.7,
+      waypoints: waypoints,
     });
   }
 
@@ -65,4 +102,8 @@ export class ApiService {
       );
     });
   }
-}
+  
+  static async getSunPosition(
+    hour: number,
+    day: number
+  ): Promise<{ azimuth: number; elevation: number; is_daytime: boolean }> {
