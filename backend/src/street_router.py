@@ -125,3 +125,72 @@ class StreetRouter:
         # Find nearest nodes
         start_node = self.find_nearest_node(start_x, start_y)
         end_node = self.find_nearest_node(end_x, end_y)
+        
+        if start_node is None or end_node is None:
+            print("Could not find start or end node in street network")
+            return None
+        
+        # A* search
+        open_set = [(0, start_node)]
+        came_from = {}
+        g_score = {start_node: 0}
+        
+        while open_set:
+            current_f, current = heapq.heappop(open_set)
+            
+            if current == end_node:
+                # Reconstruct path
+                path = []
+                node = current
+                while node in came_from:
+                    x, y = self.nodes[node]
+                    path.append((x, y))
+                    node = came_from[node]
+                
+                # Add start
+                path.append(self.nodes[start_node])
+                path.reverse()
+                
+                # Add actual start and end points
+                path.insert(0, (start_x, start_y))
+                path.append((end_x, end_y))
+                
+                return path
+            
+            # Check neighbors
+            for id1, id2, dist in self.edges:
+                if id1 == current:
+                    neighbor = id2
+                elif id2 == current:
+                    neighbor = id1
+                else:
+                    continue
+                
+                # Calculate cost
+                edge_cost = dist
+                
+                # Add shade cost if shadow calculator provided
+                if shadow_calc and shade_weight > 0:
+                    x1, y1 = self.nodes[current]
+                    x2, y2 = self.nodes[neighbor]
+                    
+                    # Simple shade calculation
+                    # In production, would query shadow data
+                    shade_prob = 0.3  # Default moderate shade
+                    sun_exposure = 1 - shade_prob
+                    edge_cost = (1 - shade_weight) * dist + shade_weight * dist * sun_exposure
+                
+                tentative_g = g_score[current] + edge_cost
+                
+                if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g
+                    
+                    # Heuristic: Euclidean distance to goal
+                    end_x_node, end_y_node = self.nodes[end_node]
+                    neighbor_x, neighbor_y = self.nodes[neighbor]
+                    h = math.sqrt((end_x_node - neighbor_x)**2 + (end_y_node - neighbor_y)**2)
+                    
+                    f_score = tentative_g + h
+                    heapq.heappush(open_set, (f_score, neighbor))
+        

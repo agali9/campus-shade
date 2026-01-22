@@ -230,3 +230,72 @@ function App() {
         directionsServiceToUse
       );
       const shadeRoutePromise = showShadeRoute
+        ? ApiService.computeShadeOptimizedRoute(
+            startLocation,
+            endLocation,
+            timeOfDay,
+            dayOfYear
+          )
+        : Promise.resolve(null);
+
+      const googleResult = await googleDirectionsPromise;
+
+      setGoogleRoute(googleResult);
+
+      if (googleResult.routes[0]?.legs[0]) {
+        const leg = googleResult.routes[0].legs[0];
+        setGoogleRouteInfo({
+          distance: leg.distance?.text || 'N/A',
+          duration: leg.duration?.text || 'N/A',
+        });
+      }
+
+      if (showShadeRoute && googleResult.routes[0]) {
+        try {
+          const shadeResult = await shadeRoutePromise;
+          
+          if (shadeResult && shadeResult.polyline_coordinates && shadeResult.polyline_coordinates.length > 0) {
+            setShadedPath(
+              shadeResult.polyline_coordinates.map(([lng, lat]) => [lat, lng])
+            );
+            setShadedRouteInfo({
+              distance: shadeResult.total_distance,
+              shade: shadeResult.average_shade,
+              time: shadeResult.total_time_minutes,
+              fastestShade: shadeResult.comparison?.fastest_shade,
+              segments: shadeResult.segments,
+              fastestSegments: shadeResult.fastest_segments,
+            });
+          } else {
+            setShadedPath(null);
+            setShadedRouteInfo(null);
+          }
+        } catch (error) {
+          console.error('Failed to compute shade-optimized route:', error);
+          
+          let errorMsg = 'Could not compute shade-optimized route.\n\n';
+          
+          if (error instanceof Error) {
+            if (error.message.includes('too far from walkable paths')) {
+              errorMsg += '📍 The selected locations are too far from the street network.\n\n';
+              errorMsg += 'This usually happens because:\n';
+              errorMsg += '• Points are in buildings or restricted areas\n';
+              errorMsg += '• Points are outside the campus area\n\n';
+              errorMsg += '💡 Try clicking on roads or pathways instead.';
+            } else if (error.message.includes('No connected path')) {
+              errorMsg += '🚫 No connected walking path found.\n\n';
+              errorMsg += 'The points may be on disconnected parts of campus.\n';
+              errorMsg += 'Try selecting locations closer together.';
+            } else {
+              errorMsg += error.message;
+            }
+          } else {
+            errorMsg += 'Unknown error occurred.';
+          }
+          
+          alert(errorMsg);
+          
+          setShadedPath(null);
+          setShadedRouteInfo(null);
+        }
+      } else {

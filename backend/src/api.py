@@ -376,3 +376,72 @@ async def get_sun_position(
         dt = base_date + timedelta(days=day, hours=hour)
         
         azimuth, elevation = shadow_calc.get_sun_position(dt)
+        
+        return {
+            "datetime": dt.isoformat(),
+            "azimuth": float(azimuth),
+            "elevation": float(elevation),
+            "is_daytime": bool(elevation > 0)
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/buildings")
+async def get_buildings(
+    min_lat: Optional[float] = None,
+    max_lat: Optional[float] = None,
+    min_lon: Optional[float] = None,
+    max_lon: Optional[float] = None
+):
+    if not ALL_BUILDINGS:
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "error": "No building data available. Run download_tempe_data.py"
+        }
+    
+    if all(v is not None for v in [min_lat, max_lat, min_lon, max_lon]):
+        buildings = get_buildings_in_view(min_lat, max_lat, min_lon, max_lon)
+    else:
+        buildings = ALL_BUILDINGS[:1000]
+    
+    features = []
+    for b in buildings:
+        from shapely.ops import transform
+        polygon_wgs84 = transform(building_loader.project_to_wgs84, b['polygon'])
+        from shapely.geometry import mapping
+        
+        features.append({
+            "type": "Feature",
+            "geometry": mapping(polygon_wgs84),
+            "properties": {
+                "name": b['name'],
+                "height": float(b['height']),
+                "id": b.get('id', 0)
+            }
+        })
+    
+    return {
+        "type": "FeatureCollection",
+        "features": features
+    }
+
+
+@app.get("/shadows")
+async def get_shadows(
+    hour: float = Query(12.0, description="Hour of day (0-24)"),
+    day: int = Query(180, description="Day of year (0-365)"),
+    min_lat: Optional[float] = None,
+    max_lat: Optional[float] = None,
+    min_lon: Optional[float] = None,
+    max_lon: Optional[float] = None
+):
+    if not ALL_BUILDINGS:
+        from shapely.geometry import Polygon as ShapelyPolygon
+        empty_poly = ShapelyPolygon()
+        return {
+            "type": "Feature",
+            "geometry": {
