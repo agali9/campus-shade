@@ -194,3 +194,38 @@ class StreetRouter:
                     f_score = tentative_g + h
                     heapq.heappush(open_set, (f_score, neighbor))
         
+        print("No path found")
+        return None
+
+
+# Test code
+if __name__ == "__main__":
+    print("Street Router Test")
+    print("="*60)
+    
+    # Create simple test buildings
+    test_buildings = [
+        {
+            'polygon': Polygon([
+                (398000, 3702000),
+                (398100, 3702000),
+                (398100, 3702100),
+                (398000, 3702100)
+            ]),
+            'height': 15.0
+        }
+    ]
+    
+    router = StreetRouter(test_buildings)
+    
+    # Test path
+    path = router.compute_path(
+        397600, 3701600,  # Start
+        398400, 3702400   # End
+    )
+    
+    if path:
+        print(f"Γ£à Found path with {len(path)} waypoints")
+        print(f"Path length: {sum(math.sqrt((path[i+1][0]-path[i][0])**2 + (path[i+1][1]-path[i][1])**2) for i in range(len(path)-1)):.0f}m")
+    else:
+        print("Γ¥î No path found")

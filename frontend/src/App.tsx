@@ -299,3 +299,50 @@ function App() {
           setShadedRouteInfo(null);
         }
       } else {
+        setShadedPath(null);
+        setShadedRouteInfo(null);
+      }
+
+    } catch (error) {
+      console.error('Route computation failed:', error);
+      
+      clearRoutes();
+      
+      let errorMessage = '❌ Failed to compute routes.\n\n';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('Backend server')) {
+          errorMessage += '🔴 Backend Server Issue:\n';
+          errorMessage += '• Ensure backend is running: python backend/src/api.py\n';
+          errorMessage += '• Check terminal for error messages\n';
+          errorMessage += '• Verify server is at http://localhost:8000\n';
+        } else if (error.message.includes('Google Maps')) {
+          errorMessage += '🗺️ Google Maps Issue:\n';
+          errorMessage += '• Please wait a few seconds for maps to fully load\n';
+          errorMessage += '• Refresh the page if issue persists\n';
+          errorMessage += '• Check your internet connection\n';
+        } else if (error.message.includes('ZERO_RESULTS') || error.message.includes('NOT_FOUND')) {
+          errorMessage += '🗺️ Routing Issue:\n';
+          errorMessage += '• Selected locations may not be accessible by walking\n';
+          errorMessage += '• Try locations closer to campus roads/paths\n';
+          errorMessage += '• Ensure both points are on the ASU campus\n';
+        } else {
+          errorMessage += 'Error: ' + error.message + '\n\n';
+          errorMessage += '💡 Troubleshooting:\n';
+          errorMessage += '• Check browser console (F12) for details\n';
+          errorMessage += '• Verify Google Maps API key is valid\n';
+          errorMessage += '• Try different locations\n';
+        }
+      }
+      
+      alert(errorMessage);
+    } finally {
+      setIsComputing(false);
+    }
+  };
+
+  if (!apiKey) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-100">
+        <div className="bg-white p-8 rounded-lg shadow-lg max-w-md">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">⚠️ Configuration Required</h1>

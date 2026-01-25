@@ -445,3 +445,52 @@ async def get_shadows(
         return {
             "type": "Feature",
             "geometry": {
+                "type": "Polygon",
+                "coordinates": [[]]
+            },
+            "properties": {
+                "time_of_day": float(hour),
+                "day_of_year": int(day),
+                "area_m2": 0.0,
+                "error": "No building data available. Run download_tempe_data.py"
+            }
+        }
+    
+    cache_key = f"{day}_{hour:.1f}"
+    buildings = []
+    
+    if not all(v is not None for v in [min_lat, max_lat, min_lon, max_lon]):
+        min_lat, max_lat = 33.4120, 33.4320
+        min_lon, max_lon = -111.9420, -111.9180
+    
+    bounds_key = f"{min_lat:.4f}_{max_lat:.4f}_{min_lon:.4f}_{max_lon:.4f}"
+    full_cache_key = f"{cache_key}_{bounds_key}"
+    
+    if full_cache_key in SHADOW_CACHE:
+        shadow_polygons = SHADOW_CACHE[full_cache_key]
+        buildings = get_buildings_in_view(min_lat, max_lat, min_lon, max_lon)
+    else:
+        tz = pytz.timezone('America/Phoenix')
+        year = 2024
+        base_date = datetime(year, 1, 1, tzinfo=tz)
+        dt = base_date + timedelta(days=day, hours=hour)
+        
+        buildings = get_buildings_in_view(min_lat, max_lat, min_lon, max_lon)
+        
+        shadow_polygons = shadow_calc.calculate_shadow_polygons(buildings, dt)
+        SHADOW_CACHE[full_cache_key] = shadow_polygons
+
+    combined_shadow = unary_union(shadow_polygons) if shadow_polygons else None
+    SHADOW_UNION_CACHE[full_cache_key] = combined_shadow
+    features = []
+    for idx, shadow in enumerate(shadow_polygons):
+        shadow_wgs84 = transform(building_loader.project_to_wgs84, shadow)
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(shadow_wgs84),
+                "properties": {"shadow_id": idx},
+            }
+        )
+
+    result = {

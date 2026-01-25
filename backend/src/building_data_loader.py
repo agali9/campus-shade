@@ -225,3 +225,44 @@ class BuildingDataLoader:
         ])
         
         filtered = []
+        for building in buildings:
+            if building['polygon'].intersects(bbox):
+                filtered.append(building)
+        
+        return filtered
+
+
+# Test and example usage
+if __name__ == "__main__":
+    print("Building Data Loader Test\n" + "="*50)
+    
+    loader = BuildingDataLoader()
+    
+    # Create synthetic buildings
+    buildings = loader.create_synthetic_buildings(count=25)
+    
+    print(f"\nSample building:")
+    b = buildings[0]
+    print(f"  Name: {b['name']}")
+    print(f"  Height: {b['height']:.1f}m")
+    print(f"  Area: {b['polygon'].area:.0f}m┬▓")
+    
+    # Save to file
+    output_file = "data/buildings/asu_buildings_synthetic.geojson"
+    loader.save_to_geojson(buildings, output_file)
+    
+    # Try loading back
+    loaded = loader.load_from_geojson(output_file)
+    print(f"\nLoaded {len(loaded)} buildings from file")
+    
+    # Test bounds filtering
+    filtered = loader.get_buildings_in_bounds(
+        buildings,
+        min_lat=33.420,
+        max_lat=33.428,
+        min_lon=-111.935,
+        max_lon=-111.925
+    )
+    print(f"Buildings in filtered bounds: {len(filtered)}")
+    
+    print("\nΓ£à Building data loader working correctly!")
