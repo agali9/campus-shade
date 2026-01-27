@@ -215,3 +215,72 @@ export const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
               zIndex: 1,
               clickable: false
             }}
+          />
+        ))}
+
+        {isLoaded && shadowData && shadowPaths.length > 0 && shadowPaths.map((path, idx) => (
+          <Polygon
+            key={`shadow-${idx}`}
+            paths={path}
+            options={{
+              fillColor: '#000000',
+              fillOpacity: 0.35,
+              strokeColor: '#000000',
+              strokeWeight: 1,
+              strokeOpacity: 0.35,
+              zIndex: 250,
+              clickable: false
+            }}
+          />
+        ))}
+
+        {isLoaded && startLocation && (
+          <Marker
+            position={{ lat: startLocation.lat, lng: startLocation.lon }}
+            label={{
+              text: "A",
+              color: "white",
+              fontSize: "14px",
+              fontWeight: "bold"
+            }}
+            icon={{
+              url: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png',
+              scaledSize: new google.maps.Size(40, 40)
+            }}
+            zIndex={10}
+          />
+        )}
+
+        {isLoaded && endLocation && (
+          <Marker
+            position={{ lat: endLocation.lat, lng: endLocation.lon }}
+            label={{
+              text: "B",
+              color: "white",
+              fontSize: "14px",
+              fontWeight: "bold"
+            }}
+            icon={{
+              url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
+              scaledSize: new google.maps.Size(40, 40)
+            }}
+            zIndex={10}
+          />
+        )}
+
+        {isLoaded && (
+          <DirectionsRenderer
+            directions={googleRoute || undefined}
+            options={{
+              polylineOptions: {
+                strokeColor: '#3b82f6',
+                strokeWeight: 6,
+                strokeOpacity: 0.8,
+                zIndex: 5
+              },
+              suppressMarkers: true,
+              preserveViewport: true
+            }}
+            onLoad={(dr) => {
+              directionsRendererRef.current = dr;
+            }}

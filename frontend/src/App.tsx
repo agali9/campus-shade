@@ -392,3 +392,49 @@ function App() {
         onShowShadowsChange={setShowShadows}
         onComputeRoute={handleComputeRoute}
         onReset={handleReset}
+        isComputing={isComputing}
+        googleRouteInfo={googleRouteInfo}
+        shadedRouteInfo={shadedRouteInfo}
+        isCollapsed={isControlsCollapsed}
+        onToggleCollapse={() => setIsControlsCollapsed(!isControlsCollapsed)}
+      />
+
+      {(googleRoute || shadedPath || showShadows) && (
+        <div style={{
+          position: 'fixed',
+          bottom: '32px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+          padding: '16px 24px',
+          pointerEvents: 'none',
+          border: '1px solid #f3f4f6'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
+            {googleRoute && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '32px',
+                  height: '4px',
+                  backgroundColor: '#3b82f6',
+                  borderRadius: '2px'
+                }}></div>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                  Fastest Route
+                </span>
+              </div>
+            )}
+            {shadedPath && showShadeRoute && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '32px',
+                  height: '4px',
+                  backgroundColor: '#10b981',
+                  borderRadius: '2px'
+                }}></div>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                  Shade-Optimized Route
+                </span>
