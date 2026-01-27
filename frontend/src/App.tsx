@@ -346,3 +346,49 @@ function App() {
       <div className="flex items-center justify-center h-screen bg-gray-100">
         <div className="bg-white p-8 rounded-lg shadow-lg max-w-md">
           <h1 className="text-2xl font-bold text-red-600 mb-4">⚠️ Configuration Required</h1>
+          <p className="text-gray-700 mb-4">Google Maps API key is missing.</p>
+          <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600">
+            <li>Get API key from Google Cloud Console</li>
+            <li>Create <code className="bg-gray-100 px-2 py-1 rounded">frontend/.env.local</code></li>
+            <li>Add: <code className="bg-gray-100 px-2 py-1 rounded">VITE_GOOGLE_MAPS_API_KEY=your_key</code></li>
+            <li>Restart development server</li>
+          </ol>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative h-screen w-screen">
+      <GoogleMapComponent
+        apiKey={apiKey}
+        startLocation={startLocation}
+        endLocation={endLocation}
+        googleRoute={googleRoute}
+        shadedPath={shadedPath}
+        shadowData={showShadows ? shadowData : null}
+        buildingData={buildingData}
+        onMapClick={handleMapClick}
+        onMapLoad={() => setMapsLoaded(true)}
+        center={center}
+      />
+      
+      <GoogleControls
+        startAddress={startAddress}
+        endAddress={endAddress}
+        timeOfDay={timeOfDay}
+        dayOfYear={dayOfYear}
+        showShadeRoute={showShadeRoute}
+        showShadows={showShadows}
+        sunPosition={sunPosition}
+        onStartSelect={handleStartSelect}
+        onEndSelect={handleEndSelect}
+        onSwapLocations={handleSwapLocations}
+        onStartClear={handleStartClear}
+        onEndClear={handleEndClear}
+        onTimeChange={setTimeOfDay}
+        onDayChange={setDayOfYear}
+        onShowShadeRouteChange={setShowShadeRoute}
+        onShowShadowsChange={setShowShadows}
+        onComputeRoute={handleComputeRoute}
+        onReset={handleReset}

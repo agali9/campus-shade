@@ -371,3 +371,118 @@ export const GoogleControls: React.FC<GoogleControlsProps> = ({
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = 'white';
                 e.currentTarget.style.borderColor = '#e5e7eb';
+                e.currentTarget.style.color = '#6b7280';
+              }}
+              title="Clear all"
+            >
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Help Text */}
+        <div style={{
+          padding: '12px 24px',
+          backgroundColor: '#fafafa',
+          borderTop: '1px solid #f3f4f6',
+          fontSize: '12px',
+          color: '#6b7280',
+          lineHeight: '1.5'
+        }}>
+          ≡ƒÆí <strong>Tip:</strong> Search for locations or click on the map to set points
+        </div>
+      </div>
+
+      {/* Route Information Panel */}
+      {(googleRouteInfo || shadedRouteInfo) && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          zIndex: 9999,
+          width: '340px',
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+          overflow: 'hidden',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+        }}>
+          <div style={{
+            padding: '20px 24px 16px',
+            borderBottom: '1px solid #f3f4f6',
+            background: 'linear-gradient(to bottom, #ffffff, #fafafa)'
+          }}>
+            <h3 style={{
+              fontSize: '16px',
+              fontWeight: 600,
+              color: '#111827',
+              margin: 0,
+              letterSpacing: '-0.02em'
+            }}>≡ƒôè Route Comparison</h3>
+          </div>
+
+          <div style={{ padding: '20px 24px' }}>
+            {/* Google Route */}
+            {googleRouteInfo && (
+              <div style={{
+                marginBottom: shadedRouteInfo ? '16px' : 0,
+                padding: '16px',
+                backgroundColor: '#eff6ff',
+                border: '1.5px solid #bfdbfe',
+                borderRadius: '10px'
+              }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  marginBottom: '12px'
+                }}>
+                  <div style={{
+                    width: '24px',
+                    height: '4px',
+                    backgroundColor: '#3b82f6',
+                    borderRadius: '2px'
+                  }}></div>
+                  <span style={{
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: '#1e40af',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>Fastest Route</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 500 }}>Distance</span>
+                    <span style={{ fontSize: '15px', color: '#1e293b', fontWeight: 600 }}>{googleRouteInfo.distance}</span>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 500 }}>Duration</span>
+                    <span style={{ fontSize: '15px', color: '#1e293b', fontWeight: 600 }}>{googleRouteInfo.duration}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Shaded Route */}
+            {shadedRouteInfo && (
+              <div style={{
+                padding: '16px',
+                backgroundColor: '#f0fdf4',
+                border: '1.5px solid #86efac',
+                borderRadius: '10px'
+              }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
