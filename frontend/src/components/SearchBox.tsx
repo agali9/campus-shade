@@ -42,3 +42,48 @@ export const SearchBox: React.FC<SearchBoxProps> = ({
         };
         
         const address = place.formatted_address || place.name || '';
+        setInputValue(address);
+        onPlaceSelected(location, address);
+      }
+    });
+
+    return () => {
+      if (autocompleteRef.current) {
+        google.maps.event.clearInstanceListeners(autocompleteRef.current);
+      }
+    };
+  }, [onPlaceSelected]);
+
+  useEffect(() => {
+    setInputValue(value);
+  }, [value]);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        ref={inputRef}
+        type="text"
+        value={inputValue}
+        onChange={(e) => {
+          const next = e.target.value;
+          setInputValue(next);
+          if (next.trim() === '' && onClear) {
+            onClear();
+          }
+        }}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        placeholder={placeholder}
+        style={{
+          width: '100%',
+          padding: '12px 14px',
+          fontSize: '14px',
+          fontWeight: 400,
+          color: '#1f2937',
+          backgroundColor: 'white',
+          border: `1.5px solid ${isFocused ? '#4f46e5' : '#e5e7eb'}`,
+          borderRadius: '8px',
+          outline: 'none',
+          transition: 'all 0.2s',
+          boxShadow: isFocused ? '0 0 0 3px rgba(79, 70, 229, 0.1)' : 'none',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'

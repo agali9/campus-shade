@@ -284,3 +284,28 @@ export const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
             onLoad={(dr) => {
               directionsRendererRef.current = dr;
             }}
+            onUnmount={() => {
+              directionsRendererRef.current = null;
+            }}
+          />
+        )}
+
+        {isLoaded && shadedPath && shadedPath.length > 0 && (
+          <Polyline
+            path={shadedPath.map(([lat, lng]) => ({ lat, lng }))}
+            options={shadedPolylineOptions}
+            onLoad={(polyline) => {
+              if (shadedPolylineRef.current && shadedPolylineRef.current !== polyline) {
+                shadedPolylineRef.current.setMap(null);
+              }
+              shadedPolylineRef.current = polyline;
+            }}
+            onUnmount={() => {
+              shadedPolylineRef.current = null;
+            }}
+          />
+        )}
+      </GoogleMap>
+    </LoadScript>
+  );
+};

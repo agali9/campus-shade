@@ -438,3 +438,27 @@ function App() {
                 <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
                   Shade-Optimized Route
                 </span>
+              </div>
+            )}
+            {showShadows && shadowData && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '32px',
+                  height: '20px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(0, 0, 0, 0.2)'
+                }}></div>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                  Building Shadows
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;
