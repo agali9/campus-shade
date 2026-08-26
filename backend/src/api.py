@@ -494,3 +494,92 @@ async def get_shadows(
         )
 
     result = {
+        "type": "FeatureCollection",
+        "features": features,
+        "properties": {
+            "time_of_day": float(hour),
+            "day_of_year": int(day),
+            "area_m2": float(combined_shadow.area if combined_shadow is not None else 0.0),
+            "shadow_count": len(shadow_polygons),
+            "building_count": len(buildings),
+        }
+    }
+    
+    return result
+
+
+@app.post("/route", response_model=RouteResponse)
+async def compute_route(request: RouteRequest):
+    try:
+        if route_service is None:
+            raise HTTPException(
+                status_code=503, 
+                detail="Routing service not initialized."
+            )
+
+        tz = pytz.timezone('America/Phoenix')
+        year = 2024
+        base_date = datetime(year, 1, 1, tzinfo=tz)
+        dt = base_date + timedelta(days=request.day_of_year, hours=request.time_of_day)
+
+        departure_minutes = int(request.time_of_day * 60)
+        cache_key = route_cache.key(
+            request.start.lat,
+            request.start.lon,
+            request.end.lat,
+            request.end.lon,
+            departure_minutes,
+            request.optimize_for,
+            request.shade_weight,
+            int(request.day_of_year),
+        )
+        cached = route_cache.get(cache_key)
+        if cached is not None:
+            CACHE_HIT_RATE.labels(result="hit").inc()
+            return cached
+        CACHE_HIT_RATE.labels(result="miss").inc()
+
+        padding = 0.01
+        min_lat = min(request.start.lat, request.end.lat) - padding
+        max_lat = max(request.start.lat, request.end.lat) + padding
+        min_lon = min(request.start.lon, request.end.lon) - padding
+        max_lon = max(request.start.lon, request.end.lon) + padding
+        db_buildings = route_store.fetch_buildings_in_bbox(min_lat, max_lat, min_lon, max_lon)
+        route_buildings = []
+        for row in db_buildings:
+            polygon_wgs84 = wkt_loads(row.geom_wkt)
+            polygon_utm = transform(building_loader.project_to_utm, polygon_wgs84)
+            route_buildings.append(
+                {"polygon": polygon_utm, "height": row.height, "name": row.name, "id": row.id}
+            )
+        shadow_polygons = shadow_calc.calculate_shadow_polygons(route_buildings, dt)
+        combined_shadow = unary_union(shadow_polygons) if shadow_polygons else None
+
+        with tracer.start_as_current_span("route_pathfind_fastest"):
+            fastest_result = route_service.route(
+                request.start.lat,
+                request.start.lon,
+                request.end.lat,
+                request.end.lon,
+                shade_weight=0.0,
+                day_of_year=int(request.day_of_year),
+                departure_minutes=departure_minutes,
+                shadow_polygon_utm=combined_shadow,
+                building_loader=building_loader,
+                shadow_calc=shadow_calc,
+                time_aware=False,
+            )
+        with tracer.start_as_current_span("route_pathfind_shade"):
+            shade_result = route_service.route(
+                request.start.lat,
+                request.start.lon,
+                request.end.lat,
+                request.end.lon,
+                shade_weight=request.shade_weight,
+                day_of_year=int(request.day_of_year),
+                departure_minutes=departure_minutes,
+                shadow_polygon_utm=combined_shadow,
+                building_loader=building_loader,
+                shadow_calc=shadow_calc,
+                time_aware=True,
+            )

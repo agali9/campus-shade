@@ -3,6 +3,7 @@ Building shadow calculator using real sun position and geometry.
 Requires: geopandas, shapely, pvlib, pytz
 """
 
+import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
@@ -18,7 +19,7 @@ try:
     PVLIB_AVAILABLE = True
 except ImportError:
     PVLIB_AVAILABLE = False
-    print("ΓÜá∩╕Å pvlib not installed. Install with: pip install pvlib")
+    print("[WARN] pvlib not installed. Install with: pip install pvlib")
 
 class ShadowCalculator:
     """Calculate building shadows based on sun position."""
@@ -34,6 +35,7 @@ class ShadowCalculator:
         # ASU Tempe coordinates
         self.latitude = 33.4242
         self.longitude = -111.9281
+        self.logger = logging.getLogger("uvicorn.error")
         
     def get_sun_position(self, dt: datetime) -> Tuple[float, float]:
         """
@@ -43,30 +45,40 @@ class ShadowCalculator:
             dt: DateTime object (timezone-aware)
             
         Returns:
-            (azimuth, elevation) in degrees
+            (azimuth, elevation) in degrees as Python floats
         """
         if not PVLIB_AVAILABLE:
             # Fallback: simple approximation
             hour = dt.hour + dt.minute / 60
             # Elevation: peak at solar noon (12pm)
             elevation = 60 * math.sin((hour - 6) / 12 * math.pi)
-            # Azimuth: rotate from east (90┬░) through south (180┬░) to west (270┬░)
+            # Azimuth: rotate from east (90°) through south (180°) to west (270°)
             azimuth = 90 + (hour - 6) / 12 * 180
-            return azimuth, max(0, elevation)
+            return float(azimuth), float(max(0, elevation))
         
-        # Use pvlib for accurate calculation
-        times = pd.DatetimeIndex([dt])
-        solar_pos = solarposition.get_solarposition(
-            times, 
-            self.latitude, 
-            self.longitude,
-            method='nrel_numpy'
-        )
-        
-        azimuth = solar_pos['azimuth'].iloc[0]
-        elevation = solar_pos['apparent_elevation'].iloc[0]
-        
-        return azimuth, elevation
+        try:
+            # Use pvlib for accurate calculation
+            times = pd.DatetimeIndex([dt])
+            solar_pos = solarposition.get_solarposition(
+                times, 
+                self.latitude, 
+                self.longitude,
+                method='nrel_numpy'
+            )
+            
+            # Convert numpy types to Python floats for JSON serialization
+            azimuth = float(solar_pos['azimuth'].iloc[0])
+            elevation = float(solar_pos['apparent_elevation'].iloc[0])
+            
+            return azimuth, elevation
+        except Exception as e:
+            print(f"[WARN] pvlib solar position failed: {e}")
+            print("Using fallback calculation...")
+            # Fallback calculation
+            hour = dt.hour + dt.minute / 60
+            elevation = 60 * math.sin((hour - 6) / 12 * math.pi)
+            azimuth = 90 + (hour - 6) / 12 * 180
+            return float(azimuth), float(max(0, elevation))
     
     def calculate_shadow_polygon(
         self, 
@@ -103,7 +115,7 @@ class ShadowCalculator:
         shadow_direction = (azimuth + 180) % 360
         
         # Convert to cartesian offset
-        # Note: 0┬░ = North = +Y, 90┬░ = East = +X
+        # Note: 0° = North = +Y, 90° = East = +X
         dx = shadow_length * math.sin(math.radians(shadow_direction))
         dy = shadow_length * math.cos(math.radians(shadow_direction))
         
@@ -155,27 +167,59 @@ class ShadowCalculator:
         # Get sun position
         azimuth, elevation = self.get_sun_position(dt)
         
-        print(f"Sun position at {dt}: azimuth={azimuth:.1f}┬░, elevation={elevation:.1f}┬░")
-        
-        # Calculate individual shadows
-        shadows = []
-        for building in buildings:
-            shadow = self.calculate_shadow_polygon(
-                building['polygon'],
-                building['height'],
-                azimuth,
-                elevation
-            )
-            if shadow:
-                shadows.append(shadow)
+        shadow_polygons = self.calculate_shadow_polygons(buildings, dt, azimuth=azimuth, elevation=elevation)
         
         # Union all shadows
-        if shadows:
-            combined = unary_union(shadows)
-            print(f"Calculated {len(shadows)} building shadows")
+        if shadow_polygons:
+            combined = unary_union(shadow_polygons)
             return combined
         else:
             return Polygon()  # Empty polygon
+
+    def calculate_shadow_polygons(
+        self,
+        buildings: List[Dict],
+        dt: datetime,
+        azimuth: Optional[float] = None,
+        elevation: Optional[float] = None,
+    ) -> List[Polygon]:
+        """Calculate one shadow geometry per building footprint."""
+        if azimuth is None or elevation is None:
+            azimuth, elevation = self.get_sun_position(dt)
+        self.logger.info(
+            "Sun position at %s: azimuth=%.1f, elevation=%.1f",
+            dt,
+            azimuth,
+            elevation,
+        )
+
+        shadows: List[Polygon] = []
+        for building in buildings:
+            polygon = building.get("polygon")
+            if polygon is None or polygon.is_empty:
+                continue
+            building_height = float(building.get("height", 0.0))
+            if building_height <= 0.0:
+                continue
+
+            if isinstance(polygon, MultiPolygon):
+                polygons = list(polygon.geoms)
+            else:
+                polygons = [polygon]
+
+            for poly in polygons:
+                if poly.is_empty:
+                    continue
+                shadow = self.calculate_shadow_polygon(poly, building_height, azimuth, elevation)
+                if shadow is not None and not shadow.is_empty:
+                    shadows.append(shadow)
+
+        self.logger.info(
+            "Calculated %s building shadows from %s buildings",
+            len(shadows),
+            len(buildings),
+        )
+        return shadows
     
     def calculate_street_shade(
         self,
@@ -200,12 +244,12 @@ class ShadowCalculator:
             if intersection.is_empty:
                 return 0.0
             
-            if isinstance(intersection, (LineString, MultiPolygon)):
+            if isinstance(intersection, LineString):
                 shaded_length = intersection.length
-            elif hasattr(intersection, '__iter__'):
+            elif hasattr(intersection, "geoms"):
                 shaded_length = sum(geom.length for geom in intersection.geoms)
             else:
-                shaded_length = 0.0
+                shaded_length = float(getattr(intersection, "length", 0.0))
             
             # Calculate fraction
             total_length = street_line.length
@@ -217,10 +261,3 @@ class ShadowCalculator:
             
         except Exception as e:
             print(f"Error calculating street shade: {e}")
-            return 0.0
-
-
-# Example usage and testing
-if __name__ == "__main__":
-    print("Shadow Calculator Test\n" + "="*50)
-    
