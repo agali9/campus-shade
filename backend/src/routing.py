@@ -427,5 +427,354 @@ class DBRouteService:
 
     def route(
         self,
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+        shade_weight: float,
+        day_of_year: int,
+        departure_minutes: int,
+        shadow_polygon_utm,
+        building_loader,
+        shadow_calc,
+        time_aware: bool = True,
+    ) -> Optional[RoutePathResult]:
+        if self.graph is None:
+            return None
+        working = self.graph.copy()
+        start_tmp = self._snap_point_to_edge(working, start_lat, start_lon, "start")
+        end_tmp = self._snap_point_to_edge(working, end_lat, end_lon, "end")
+        if start_tmp is None or end_tmp is None:
+            return None
 
-# migrate street router into datastore
+        try:
+            if time_aware:
+                node_path, edge_path, static_exposure, dynamic_exposure = self._time_aware_dijkstra(
+                    working,
+                    start_tmp,
+                    end_tmp,
+                    day_of_year=day_of_year,
+                    departure_minutes=departure_minutes,
+                    shade_weight=shade_weight,
+                    shadow_polygon_utm=shadow_polygon_utm,
+                    building_loader=building_loader,
+                    shadow_calc=shadow_calc,
+                )
+                self.logger.info(
+                    "time_aware_vs_static_exposure",
+                    extra={
+                        "static_exposure": round(static_exposure, 4),
+                        "time_aware_exposure": round(dynamic_exposure, 4),
+                    },
+                )
+            else:
+                node_path = nx.shortest_path(
+                    working,
+                    start_tmp,
+                    end_tmp,
+                    weight=lambda u, v, d: float(d.get("length", self._edge_length_m(working, u, v, d))),
+                    method="dijkstra",
+                )
+                edge_path = self._node_path_to_edges(working, node_path)
+        except Exception:
+            return None
+
+        node_coords = [(float(working.nodes[n]["y"]), float(working.nodes[n]["x"])) for n in node_path]
+        polyline, edge_geometries, edge_ids = self._build_route_geometry(working, edge_path)
+        return RoutePathResult(
+            node_path=node_coords,
+            polyline_path=polyline,
+            edge_geometries_lnglat=edge_geometries,
+            edge_ids=edge_ids,
+        )
+
+    def _time_aware_dijkstra(
+        self,
+        graph: nx.MultiDiGraph,
+        start_node,
+        end_node,
+        day_of_year: int,
+        departure_minutes: int,
+        shade_weight: float,
+        shadow_polygon_utm,
+        building_loader,
+        shadow_calc,
+    ) -> Tuple[List[object], List[Tuple[object, object, object]], float, float]:
+        import heapq
+
+        speed_mps = 1.4
+        pq = [(0.0, 0.0, start_node)]  # cost, seconds_from_start, node
+        parent: Dict[object, object] = {}
+        parent_edge: Dict[object, Tuple[object, object, object]] = {}
+        best_cost = {start_node: 0.0}
+        static_exposure = 0.0
+        dynamic_exposure = 0.0
+
+        while pq:
+            cost, elapsed_sec, node = heapq.heappop(pq)
+            if node == end_node:
+                node_path = self._reconstruct(parent, end_node)
+                edge_path = self._reconstruct_edges(parent_edge, end_node)
+                return node_path, edge_path, static_exposure, dynamic_exposure
+            if cost > best_cost.get(node, float("inf")):
+                continue
+
+            for nbr, key_dict in graph[node].items():
+                for k, data in key_dict.items():
+                    length = float(data.get("length", self._edge_length_m(graph, node, nbr, data)))
+                    travel_sec = length / speed_mps
+                    arrival_min = int(departure_minutes + (elapsed_sec + travel_sec) / 60)
+                    edge_id = edge_identifier(node, nbr, k)
+                    shade_fraction = self.store.shade_for_edge_at_time(edge_id, day_of_year, arrival_min)
+                    if shade_fraction is None:
+                        geom = self._edge_geometry_data(graph, node, nbr, data)
+                        line_utm = transform(building_loader.project_to_utm, geom)
+                        shade_fraction = (
+                            shadow_calc.calculate_street_shade(line_utm, shadow_polygon_utm)
+                            if shadow_polygon_utm is not None and not shadow_polygon_utm.is_empty
+                            else 0.0
+                        )
+                    sun_fraction = 1.0 - float(max(0.0, min(1.0, shade_fraction)))
+                    edge_cost = length * (1.0 + max(0.0, shade_weight) * sun_fraction)
+                    new_cost = cost + edge_cost
+                    if new_cost < best_cost.get(nbr, float("inf")):
+                        best_cost[nbr] = new_cost
+                        parent[nbr] = node
+                        parent_edge[nbr] = (node, nbr, k)
+                        heapq.heappush(pq, (new_cost, elapsed_sec + travel_sec, nbr))
+                        dynamic_exposure += sun_fraction * length
+                        static_exposure += max(0.0, 1.0 - shade_fraction) * length
+        raise RuntimeError("No path found")
+
+    @staticmethod
+    def _reconstruct(parent: Dict[object, object], end_node: object) -> List[object]:
+        path = [end_node]
+        node = end_node
+        while node in parent:
+            node = parent[node]
+            path.append(node)
+        path.reverse()
+        return path
+
+    @staticmethod
+    def _reconstruct_edges(
+        parent_edge: Dict[object, Tuple[object, object, object]],
+        end_node: object,
+    ) -> List[Tuple[object, object, object]]:
+        edges: List[Tuple[object, object, object]] = []
+        node = end_node
+        while node in parent_edge:
+            edges.append(parent_edge[node])
+            node = parent_edge[node][0]
+        edges.reverse()
+        return edges
+
+    def _node_path_to_edges(
+        self,
+        graph: nx.MultiDiGraph,
+        node_path: List[object],
+    ) -> List[Tuple[object, object, object]]:
+        edges: List[Tuple[object, object, object]] = []
+        for i in range(len(node_path) - 1):
+            u = node_path[i]
+            v = node_path[i + 1]
+            key = self._best_edge_key(graph, u, v)
+            edges.append((u, v, key))
+        return edges
+
+    def _build_route_geometry(
+        self,
+        graph: nx.MultiDiGraph,
+        edge_path: List[Tuple[object, object, object]],
+    ) -> Tuple[List[Tuple[float, float]], List[List[Tuple[float, float]]], List[str]]:
+        polyline_latlon: List[Tuple[float, float]] = []
+        edge_geometries_lnglat: List[List[Tuple[float, float]]] = []
+        edge_ids: List[str] = []
+
+        for idx, (u, v, key) in enumerate(edge_path):
+            geom = self._edge_geometry(graph, u, v, key)
+            edge_ids.append(edge_identifier(u, v, key))
+            edge_lnglat = [(float(x), float(y)) for x, y in geom.coords]
+            edge_geometries_lnglat.append(edge_lnglat)
+            edge_latlon = [(float(y), float(x)) for x, y in geom.coords]
+            if idx == 0:
+                polyline_latlon.extend(edge_latlon)
+            else:
+                polyline_latlon.extend(edge_latlon[1:])
+        return polyline_latlon, edge_geometries_lnglat, edge_ids
+
+    def _best_edge_key(self, graph: nx.MultiDiGraph, u, v):
+        edge_dict = graph.get_edge_data(u, v)
+        if not edge_dict:
+            return 0
+        best_key = None
+        best_length = float("inf")
+        for key, data in edge_dict.items():
+            length = float(data.get("length", self._edge_length_m(graph, u, v, data)))
+            if length < best_length:
+                best_length = length
+                best_key = key
+        return 0 if best_key is None else best_key
+
+    @staticmethod
+    def route_distance_m(path: List[Tuple[float, float]]) -> float:
+        total = 0.0
+        for i in range(len(path) - 1):
+            lat1, lon1 = path[i]
+            lat2, lon2 = path[i + 1]
+            total += haversine_m(lat1, lon1, lat2, lon2)
+        return total
+
+    @staticmethod
+    def route_bbox(path: List[Tuple[float, float]]) -> Tuple[float, float, float, float]:
+        lats = [p[0] for p in path]
+        lons = [p[1] for p in path]
+        return min(lats), max(lats), min(lons), max(lons)
+
+    def _snap_point_to_edge(self, graph: nx.MultiDiGraph, lat: float, lon: float, label: str) -> Optional[str]:
+        try:
+            u, v, k = ox.distance.nearest_edges(graph, X=lon, Y=lat)
+        except Exception:
+            nearest_node = self._nearest_node_fallback(graph, lat, lon)
+            return nearest_node
+
+        geom = self._edge_geometry(graph, u, v, k)
+        projected = geom.interpolate(geom.project(Point(lon, lat)))
+        snap_distance_m = haversine_m(lat, lon, projected.y, projected.x)
+        if snap_distance_m > 300.0:
+            self.logger.warning(
+                "Snap rejected at lat=%s lon=%s nearest_edge_distance_m=%.2f max_radius_m=300",
+                lat,
+                lon,
+                snap_distance_m,
+            )
+            return None
+
+        temp_id = f"tmp_{label}_{uuid.uuid4().hex[:8]}"
+        graph.add_node(temp_id, x=float(projected.x), y=float(projected.y))
+
+        self._split_edge(graph, u, v, k, temp_id, projected)
+        if graph.has_edge(v, u):
+            reverse_keys = list(graph[v][u].keys())
+            for rk in reverse_keys:
+                self._split_edge(graph, v, u, rk, temp_id, projected)
+        return temp_id
+
+    @staticmethod
+    def _nearest_node_fallback(graph: nx.MultiDiGraph, lat: float, lon: float):
+        best = None
+        best_distance = float("inf")
+        for node_id, data in graph.nodes(data=True):
+            d = haversine_m(lat, lon, float(data["y"]), float(data["x"]))
+            if d < best_distance:
+                best_distance = d
+                best = node_id
+        return best if best_distance <= 300.0 else None
+
+    def _split_edge(self, graph: nx.MultiDiGraph, u, v, key, temp_id: str, projected_point: Point) -> None:
+        if not graph.has_edge(u, v, key):
+            return
+        attrs = dict(graph.get_edge_data(u, v, key))
+        geom = self._edge_geometry_data(graph, u, v, attrs)
+        distance_on_line = geom.project(projected_point)
+        seg1 = substring(geom, 0.0, distance_on_line)
+        seg2 = substring(geom, distance_on_line, geom.length)
+        if seg1.is_empty:
+            seg1 = LineString(
+                [
+                    (float(graph.nodes[u]["x"]), float(graph.nodes[u]["y"])),
+                    (float(projected_point.x), float(projected_point.y)),
+                ]
+            )
+        if seg2.is_empty:
+            seg2 = LineString(
+                [
+                    (float(projected_point.x), float(projected_point.y)),
+                    (float(graph.nodes[v]["x"]), float(graph.nodes[v]["y"])),
+                ]
+            )
+        graph.remove_edge(u, v, key)
+        attrs1 = dict(attrs)
+        attrs2 = dict(attrs)
+        attrs1["geometry"] = seg1
+        attrs2["geometry"] = seg2
+        attrs1["length"] = max(0.1, self._linestring_length_m(seg1))
+        attrs2["length"] = max(0.1, self._linestring_length_m(seg2))
+        graph.add_edge(u, temp_id, **attrs1)
+        graph.add_edge(temp_id, v, **attrs2)
+
+    @staticmethod
+    def _edge_geometry(graph: nx.MultiDiGraph, u, v, key) -> LineString:
+        data = dict(graph.get_edge_data(u, v, key))
+        return DBRouteService._edge_geometry_data(graph, u, v, data)
+
+    @staticmethod
+    def edge_geometry_data(graph: nx.MultiDiGraph, u, v, data: Dict) -> LineString:
+        return DBRouteService._edge_geometry_data(graph, u, v, data)
+
+    @staticmethod
+    def _edge_geometry_data(graph: nx.MultiDiGraph, u, v, data: Dict) -> LineString:
+        geom = data.get("geometry")
+        if isinstance(geom, LineString):
+            return geom
+        if geom is not None:
+            try:
+                from shapely.wkt import loads as wkt_loads
+
+                return wkt_loads(str(geom))
+            except Exception:
+                pass
+        return LineString(
+            [
+                (float(graph.nodes[u]["x"]), float(graph.nodes[u]["y"])),
+                (float(graph.nodes[v]["x"]), float(graph.nodes[v]["y"])),
+            ]
+        )
+
+    @staticmethod
+    def _linestring_length_m(line: LineString) -> float:
+        coords = list(line.coords)
+        total = 0.0
+        for i in range(len(coords) - 1):
+            lon1, lat1 = coords[i]
+            lon2, lat2 = coords[i + 1]
+            total += haversine_m(lat1, lon1, lat2, lon2)
+        return total
+
+    def _edge_length_m(self, graph: nx.MultiDiGraph, u, v, data: Dict) -> float:
+        return self._linestring_length_m(self._edge_geometry_data(graph, u, v, data))
+
+    def benchmark(self, iterations: int = 1000) -> Dict[str, float]:
+        if self.graph is None:
+            raise RuntimeError("graph unavailable")
+        nodes = list(self.graph.nodes())
+        if len(nodes) < 2:
+            raise RuntimeError("graph too small")
+        latencies = []
+        for _ in range(iterations):
+            a, b = random.sample(nodes, 2)
+            start = time.perf_counter()
+            _ = self.route(
+                start_lat=float(self.graph.nodes[a]["y"]),
+                start_lon=float(self.graph.nodes[a]["x"]),
+                end_lat=float(self.graph.nodes[b]["y"]),
+                end_lon=float(self.graph.nodes[b]["x"]),
+                shade_weight=0.7,
+                day_of_year=180,
+                departure_minutes=12 * 60,
+                shadow_polygon_utm=None,
+                building_loader=lambda *args, **kwargs: None,  # not used when shadow is None
+                shadow_calc=None,
+                time_aware=False,
+            )
+            latencies.append((time.perf_counter() - start) * 1000)
+        latencies.sort()
+        return {
+            "p50_ms": latencies[int(0.50 * len(latencies))],
+            "p95_ms": latencies[int(0.95 * len(latencies))],
+            "p99_ms": latencies[int(0.99 * len(latencies))],
+        }
+
+
+def edge_identifier(u, v, key) -> str:
+    return f"{u}|{v}|{key}"

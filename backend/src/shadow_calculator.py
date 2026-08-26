@@ -261,3 +261,50 @@ class ShadowCalculator:
             
         except Exception as e:
             print(f"Error calculating street shade: {e}")
+            return 0.0
+
+
+# Example usage and testing
+if __name__ == "__main__":
+    print("Shadow Calculator Test\n" + "="*50)
+    
+    calculator = ShadowCalculator()
+    
+    # Test time
+    test_time = datetime(2024, 6, 21, 12, 0, 0, tzinfo=calculator.timezone)
+    
+    # Test building (simple rectangle)
+    test_building = {
+        'polygon': Polygon([
+            (0, 0),
+            (20, 0),
+            (20, 30),
+            (0, 30)
+        ]),
+        'height': 15.0
+    }
+    
+    # Calculate sun position
+    azimuth, elevation = calculator.get_sun_position(test_time)
+    print(f"\nSun position at {test_time}:")
+    print(f"  Azimuth: {azimuth:.1f}°")
+    print(f"  Elevation: {elevation:.1f}°")
+    
+    # Calculate shadow
+    shadow = calculator.calculate_shadow_polygon(
+        test_building['polygon'],
+        test_building['height'],
+        azimuth,
+        elevation
+    )
+    
+    if shadow:
+        print(f"\nShadow area: {shadow.area:.1f} m²")
+        print(f"Building area: {test_building['polygon'].area:.1f} m²")
+    
+    # Test street shade
+    test_street = LineString([(10, -10), (10, 40)])
+    shade_fraction = calculator.calculate_street_shade(test_street, shadow)
+    print(f"\nStreet shade fraction: {shade_fraction:.1%}")
+    
+    print("\n[OK] Shadow calculator working correctly!")

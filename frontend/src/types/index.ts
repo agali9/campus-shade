@@ -45,3 +45,12 @@ export interface CampusBounds {
   min_lon: number;
   max_lon: number;
   center: {
+    lat: number;
+    lon: number;
+  };
+}
+
+export interface DualRouteResponse {
+  fastest: RouteResponse;
+  shaded: RouteResponse;
+}

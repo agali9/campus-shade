@@ -583,3 +583,107 @@ async def compute_route(request: RouteRequest):
                 shadow_calc=shadow_calc,
                 time_aware=True,
             )
+
+        route_result = shade_result if request.optimize_for == "shade" else fastest_result
+
+        if not route_result:
+            error_msg = (
+                "Could not find a valid walking path between these locations. "
+                "This may happen if:\n"
+                "• Points are too far from walkable paths (>150m)\n"
+                "• Points are inside buildings\n"
+                "• No connected path exists in the street network\n\n"
+                "Try selecting points closer to roads or pathways on campus."
+            )
+            raise HTTPException(status_code=404, detail=error_msg)
+
+        def summarize_route(result_obj):
+            segments_local = []
+            total_shade_length_local = 0.0
+
+            polyline_coordinates_local = result_obj.polyline_path
+
+            for i in range(len(polyline_coordinates_local) - 1):
+                lat1, lon1 = polyline_coordinates_local[i]
+                lat2, lon2 = polyline_coordinates_local[i + 1]
+                x1, y1 = building_loader.project_to_utm(lon1, lat1)
+                x2, y2 = building_loader.project_to_utm(lon2, lat2)
+                segment_line = LineString([(x1, y1), (x2, y2)])
+                distance = segment_line.length
+                shade_prob = 0.0
+                if combined_shadow and not combined_shadow.is_empty:
+                    shade_prob = shadow_calc.calculate_street_shade(segment_line, combined_shadow)
+                    total_shade_length_local += distance * shade_prob
+
+                orientation = math.degrees(math.atan2(lon2 - lon1, lat2 - lat1))
+                if orientation < 0:
+                    orientation += 360
+                segments_local.append(
+                    RouteSegment(
+                        start=Location(lat=lat1, lon=lon1),
+                        end=Location(lat=lat2, lon=lon2),
+                        distance=float(distance),
+                        shade_probability=float(shade_prob),
+                        orientation=float(orientation),
+                    )
+                )
+            total_distance_local = route_service.route_distance_m(polyline_coordinates_local)
+            avg_shade_local = (total_shade_length_local / total_distance_local) if total_distance_local > 0 else 0.0
+            total_time_minutes_local = (total_distance_local / 1.4) / 60
+            return segments_local, total_distance_local, avg_shade_local, total_time_minutes_local
+
+        if fastest_result is None or shade_result is None:
+            raise HTTPException(status_code=404, detail="Failed to compute both fastest and shade routes")
+
+        _, fastest_distance, fastest_shade, _ = summarize_route(fastest_result)
+        fastest_segments, _, _, _ = summarize_route(fastest_result)
+        _, shade_distance, shade_shade, _ = summarize_route(shade_result)
+        logger.info(
+            "Route comparison: fastest_distance=%.2fm fastest_shade=%.2f%% | shade_route_distance=%.2fm shade_route_shade=%.2f%%",
+            fastest_distance,
+            fastest_shade * 100.0,
+            shade_distance,
+            shade_shade * 100.0,
+        )
+
+        segments, total_distance, avg_shade, total_time_minutes = summarize_route(route_result)
+        path_coordinates_wgs84 = route_result.node_path
+        polyline_coordinates_wgs84 = route_result.polyline_path
+
+        response = RouteResponse(
+            segments=segments,
+            total_distance=float(total_distance),
+            average_shade=float(avg_shade),
+            total_time_minutes=float(total_time_minutes),
+            path_coordinates=[[lat, lon] for lat, lon in path_coordinates_wgs84],
+            polyline_coordinates=[[lng, lat] for lat, lng in polyline_coordinates_wgs84],
+            edge_geometries=[
+                [[lng, lat] for lng, lat in edge]
+                for edge in route_result.edge_geometries_lnglat
+            ],
+            edge_ids=route_result.edge_ids,
+            comparison={
+                "fastest_distance": float(fastest_distance),
+                "fastest_shade": float(fastest_shade),
+                "shade_route_distance": float(shade_distance),
+                "shade_route_shade": float(shade_shade),
+            },
+            fastest_segments=fastest_segments,
+        )
+        ROUTE_DISTANCE.observe(float(total_distance))
+        response_payload = response.model_dump()
+        route_cache.set(cache_key, response_payload)
+
+        return response_payload
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

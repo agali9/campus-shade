@@ -71,3 +71,12 @@ class RouteSegment(BaseModel):
 
 class RouteResponse(BaseModel):
     segments: List[RouteSegment]
+    total_distance: float
+    average_shade: float
+    total_time_minutes: float
+    path_coordinates: List[List[float]]
+    polyline_coordinates: List[List[float]]
+    edge_geometries: List[List[List[float]]]
+    edge_ids: List[str]
+    comparison: Optional[dict] = None
+    fastest_segments: Optional[List[RouteSegment]] = None

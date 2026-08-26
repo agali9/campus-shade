@@ -347,3 +347,65 @@ class BuildingDataLoader:
         
         geojson = {
             'type': 'FeatureCollection',
+            'features': features
+        }
+        
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(filepath, 'w') as f:
+            json.dump(geojson, f, indent=2)
+        
+        print(f"Saved {len(buildings)} buildings to {filepath}")
+    
+    def get_buildings_in_bounds(
+        self,
+        buildings: List[Dict],
+        min_lat: float,
+        max_lat: float,
+        min_lon: float,
+        max_lon: float
+    ) -> List[Dict]:
+        """
+        Filter buildings within bounding box.
+        
+        Args:
+            buildings: List of buildings
+            min_lat, max_lat, min_lon, max_lon: Bounding box in WGS84
+            
+        Returns:
+            Filtered list of buildings
+        """
+        # Convert bounds to UTM
+        min_x, min_y = self.project_to_utm(min_lon, min_lat)
+        max_x, max_y = self.project_to_utm(max_lon, max_lat)
+        
+        bbox = Polygon([
+            (min_x, min_y),
+            (max_x, min_y),
+            (max_x, max_y),
+            (min_x, max_y)
+        ])
+        
+        filtered = []
+        for building in buildings:
+            if building['polygon'].intersects(bbox):
+                filtered.append(building)
+        
+        return filtered
+
+
+# Test and example usage
+if __name__ == "__main__":
+    print("Building Data Loader Test\n" + "="*50)
+    
+    loader = BuildingDataLoader()
+    
+    print("\n" + "="*50)
+    print("Testing projection:")
+    x, y = loader.project_to_utm(-111.9281, 33.4242)
+    print(f"ASU center: ({x:.0f}, {y:.0f})")
+    print("Expected: (~398500, ~3702500)")
+    if 397000 < x < 401000 and 3701000 < y < 3704000:
+        print("[OK] CORRECT!")
+    else:
+        print("[ERROR] WRONG!")

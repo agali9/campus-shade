@@ -107,3 +107,93 @@ export class ApiService {
     hour: number,
     day: number
   ): Promise<{ azimuth: number; elevation: number; is_daytime: boolean }> {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/sun?hour=${hour}&day=${day}`,
+        {
+          method: 'GET',
+          mode: 'cors',
+          headers: {
+            'Accept': 'application/json',
+          },
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('Failed to fetch sun position:', error);
+      throw error;
+    }
+  }
+
+  static async getShadows(
+    hour: number,
+    day: number
+  ): Promise<any> {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/shadows?hour=${hour}&day=${day}`,
+        {
+          method: 'GET',
+          mode: 'cors',
+          headers: {
+            'Accept': 'application/json',
+          },
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('Failed to fetch shadow data:', error);
+      throw error;
+    }
+  }
+
+  static async getBuildings(): Promise<any> {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/buildings`,
+        {
+          method: 'GET',
+          mode: 'cors',
+          headers: {
+            'Accept': 'application/json',
+          },
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('Failed to fetch building data:', error);
+      throw error;
+    }
+  }
+
+  static async checkBackendHealth(): Promise<boolean> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/`, {
+        method: 'GET',
+        mode: 'cors',
+        headers: {
+          'Accept': 'application/json',
+        },
+        signal: AbortSignal.timeout(5000)
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+}
