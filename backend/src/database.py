@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./campusshade.db")
-_engine: Optional[Engine] = None
-_session_factory: Optional[sessionmaker] = None
+_engine: Engine | None = None
+_session_factory: sessionmaker[Session] | None = None
 
 
 def get_engine() -> Engine:
@@ -29,7 +27,7 @@ def get_engine() -> Engine:
     return _engine
 
 
-def get_session_factory() -> sessionmaker:
+def get_session_factory() -> sessionmaker[Session]:
     """Return a reusable sessionmaker."""
     global _session_factory
     if _session_factory is None:
@@ -39,6 +37,7 @@ def get_session_factory() -> sessionmaker:
             autocommit=False,
             expire_on_commit=False,
             future=True,
+            class_=Session,
         )
     return _session_factory
 

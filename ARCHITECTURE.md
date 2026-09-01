@@ -1,51 +1,67 @@
 # Architecture
 
-## Data Flow
+CampusShade is a shade-aware walking planner for ASU Tempe.
 
-1. FastAPI receives route request with origin/destination/time.
-2. Request middleware assigns `request_id`, captures metrics/tracing spans.
-3. Route cache checks quantized key `(origin_cell, dest_cell, time_bucket)`.
-4. If cache miss:
-   - graph is loaded from PostgreSQL-backed OSM cache.
-   - points snap to nearest OSM edges.
-   - time-aware shortest-path runs with arrival-time-dependent weights.
-   - response assembled with route segments and shade stats.
-5. Response is cached, metrics emitted, request logged.
+- The live map is a Cloudflare Worker at [https://campus-shade.agali9.workers.dev/](https://campus-shade.agali9.workers.dev/).
+- Route and shadow math run on a FastAPI service hosted on Render (`https://campus-shade.onrender.com`).
+- There is no Google Maps API key. The map is MapLibre over a public raster basemap. Place search uses Nominatim.
 
-## Why OSMnx Over Custom Grid
+## Data flow
 
-- OSMnx gives a real pedestrian network with topological correctness.
-- Grid graphs produce non-physical edges and ambiguous snapping near buildings.
-- OSM graph improves routing realism and debugging confidence in interviews.
+1. The page polls `GET /` until `street_network_ready` is true. Shadows can return before that.
+2. The user sets start and end by search or by tapping the map. Clicks call `GET /snap` and stick to the nearest walk edge.
+3. **Go** posts `POST /route` once. The backend returns both the shade path and the fastest path. There is no separate directions provider.
+4. `GET /shadows` returns one grey shade mask for the current Phoenix time. **Plan** calls `GET /sun/day` for that date’s sunrise and sunset, then sends `calendar_date` with the route.
 
-## Why Time-Dependent Weights
+Render free tier sleeps. The first request after idle can take about a minute. Grey shadows only mean `/shadows` answered. Routing is ready when the panel says **Ready to route.**
 
-- Shade changes during a walk; static sun assumptions are physically wrong for longer routes.
-- Time-aware Dijkstra propagates arrival time and chooses edges based on edge-local time buckets.
-- Produces a stronger algorithmic story than simple static-weight shortest path.
+## Walk graph
 
-## Shade Precomputation Tradeoff
+Startup prefers a graph shipped with the repo: `backend/data/osm/campus_walk.json`. That file is an OSM walk extract (footway, path, pedestrian, steps, cycleway). Render does not need Overpass.
 
-- Precompute `(edge_id, time_bucket)` shade fractions at 5-minute granularity.
-- Read path: fast indexed DB lookup.
-- Write path: heavier startup / offline precompute cost.
-- Chosen tradeoff: favors query latency and predictable p95.
+Fallback order if the bundle is missing:
 
-## Observability Model
+1. SQLAlchemy graph cache (`osm_graph_cache`)
+2. Disk GraphML (`backend/data/cache/osm_walk.graphml`)
+3. Live OSMnx download (`all`, `all_public`, `walk`, then `drive`)
 
-- Structlog JSON logs for request-scoped diagnostics.
-- Prometheus metrics on `/metrics` for latency, counts, route distance, and cache hits.
-- OpenTelemetry spans across pathfind and stage timing.
+Building footprints come from `backend/data/buildings/asu_campus_only.geojson` and are kept in memory after startup.
 
-## Measured Routing Outcome
+## Why a real walk network
 
-- On a noon June 21 scenario, fastest route shade coverage is `1.46%` while shade-optimized route reaches `6.82%`.
-- This is about `4.6x` shade improvement with about `1.06x` distance cost, showing the objective function meaningfully shifts path choice.
-- This metric is a key proof point that the system optimizes for real shade exposure rather than merely distance.
+A campus grid invents edges through buildings and makes snapping unreliable. The bundled OSM ways are the paths people actually walk, and clicks can snap onto them.
 
-## What I Would Do Differently With Another Month
+## Shade vs fastest
 
-- Move shade-index precompute to a dedicated async worker with checkpointing.
-- Replace pickle graph blob with versioned graph shards + migration tooling.
-- Add map-matching quality tests using real GPS traces.
-- Introduce scenario-based SLO dashboards and alerting policies.
+Fastest mode is shortest path on edge length.
+
+Shade mode is a time-aware Dijkstra. Edge cost is `length * (1 + shade_weight * sun_fraction)`. Shade comes from the union of building shadows at the arrival-time bucket, or from a precomputed `(edge, time_bucket)` index when that has been built.
+
+At night, or whenever the chosen time is outside sunrise–sunset, there are no cast shadows. The shade route is the fastest route. Showing a second path would just pick another street of equal cost.
+
+## Sun
+
+Timezone is `America/Phoenix`. Solar position is `pvlib`, with a local approximation if that fails.
+
+Sunrise and sunset for a planned date come from Open-Meteo, cached in process. If that call fails, the backend scans elevation in 5-minute steps.
+
+## Shade on the map
+
+`GET /shadows` unions building shadows and subtracts footprints so the overlay is a single grey mask, not stacked polygons. Empty features when the sun is down.
+
+## Deployment
+
+- Frontend: Vite build served by `frontend/worker.mjs` and `frontend/wrangler.jsonc`. The MapLibre worker is emitted as its own file so the SPA fallback does not return `index.html` for it.
+- API base URL is `VITE_API_BASE_URL`, baked in at build time. Local default is `http://localhost:8000`.
+- CORS allows the Workers origin and localhost dev ports.
+- Production database is whatever `DATABASE_URL` Render sets. SQLite is the local default. Route cache is Redis only if `REDIS_URL` is set; otherwise it is in-process.
+
+## Observability
+
+- `GET /` exposes `buildings_loaded` and `street_network_ready`. The panel uses that, not a hard health gate before `/route`.
+- Structlog request logs, Prometheus on `/metrics`, optional OpenTelemetry spans.
+- `?debug=1` shows the same status plus sun details.
+
+## Measured routing outcome
+
+On a local noon June 21 comparison, fastest shade coverage was `1.46%` and the shade route reached `6.82%` (about `4.6x` more shade, about `1.06x` the distance). Those figures are from the local benchmark, not the Render cold-start path. See `PERFORMANCE.md`.

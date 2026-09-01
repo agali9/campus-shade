@@ -1,411 +1,239 @@
 """
 Load and process ASU building data for shadow calculations.
-Supports OpenStreetMap data and creates synthetic buildings if needed.
 """
 
+from __future__ import annotations
+
 import json
-import numpy as np
+import logging
 from pathlib import Path
-from typing import List, Dict, Tuple
-from shapely.geometry import Polygon, shape, mapping
-from shapely.ops import transform
+from typing import Any
+
+import numpy as np
 import pyproj
+from shapely.geometry import Polygon, mapping, shape
+from shapely.ops import transform
+
+logger = logging.getLogger("uvicorn.error")
+
+
+def _parse_building_height(props: dict[str, Any], default: float = 9.0) -> float:
+    """Prefer Maricopa/ASU LiDAR-derived AGL fields, then OSM-style keys."""
+    for key in ("HGT_AGL", "AVGHT_M", "MAXHT_M", "height", "Height"):
+        raw = props.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+
+    levels = props.get("building:levels")
+    if levels is not None and levels != "":
+        try:
+            return max(3.0, float(levels) * 3.0)
+        except (TypeError, ValueError):
+            pass
+    return default
+
 
 class BuildingDataLoader:
     """Load and process building footprints for ASU campus."""
-    
-    def __init__(self):
-        """Initialize building data loader."""
-        # ASU Tempe campus bounds (lat/lon)
+
+    def __init__(self, use_fallback: bool = False) -> None:
         self.bounds = {
-            'min_lat': 33.4120,
-            'max_lat': 33.4320,
-            'min_lon': -111.9420,
-            'max_lon': -111.9180
+            "min_lat": 33.4120,
+            "max_lat": 33.4320,
+            "min_lon": -111.9420,
+            "max_lon": -111.9180,
         }
-        
-        print("Initializing coordinate transformations...")
-        print(f"PyProj version: {pyproj.__version__}")
-        
-        # Let's calculate the correct UTM zone first
-        # UTM zone calculation: zone = int((lon + 180) / 6) + 1
-        test_lon = -111.9281
-        calculated_zone = int((test_lon + 180) / 6) + 1
-        print(f"Calculated UTM zone for lon={test_lon}: {calculated_zone}")
-        
-        # Try using EPSG code directly with modern pyproj
-        # EPSG:32612 = WGS 84 / UTM zone 12N
-        # But let's try the calculated zone
-        
-        # Test multiple approaches
-        print("\nTesting different projection methods...")
-        
-        # Method 1: Direct EPSG codes
-        print("Method 1: Using EPSG:32612 (UTM 12N)")
-        try:
-            crs_wgs84 = pyproj.CRS("EPSG:4326")
-            crs_utm12 = pyproj.CRS("EPSG:32612")
-            transformer1 = pyproj.Transformer.from_crs(crs_wgs84, crs_utm12, always_xy=True)
-            x1, y1 = transformer1.transform(-111.9281, 33.4242)
-            print(f"  Result: ({x1:.0f}, {y1:.0f})")
-        except Exception as e:
-            print(f"  Error: {e}")
-            x1, y1 = 0, 0
-        
-        # Method 2: Proj string with explicit zone
-        print(f"Method 2: Using proj string with zone {calculated_zone}")
-        try:
-            proj_string = f"+proj=utm +zone={calculated_zone} +datum=WGS84 +units=m +no_defs"
-            crs_utm_custom = pyproj.CRS(proj_string)
-            transformer2 = pyproj.Transformer.from_crs(crs_wgs84, crs_utm_custom, always_xy=True)
-            x2, y2 = transformer2.transform(-111.9281, 33.4242)
-            print(f"  Result: ({x2:.0f}, {y2:.0f})")
-        except Exception as e:
-            print(f"  Error: {e}")
-            x2, y2 = 0, 0
-        
-        # Method 3: Try zone 11 and 12 explicitly
-        for zone in [11, 12, 13]:
-            epsg_code = 32600 + zone  # Northern hemisphere
-            print(f"Method 3: Testing EPSG:{epsg_code} (UTM {zone}N)")
-            try:
-                crs_test = pyproj.CRS(f"EPSG:{epsg_code}")
-                trans_test = pyproj.Transformer.from_crs(crs_wgs84, crs_test, always_xy=True)
-                xt, yt = trans_test.transform(-111.9281, 33.4242)
-                print(f"  Result: ({xt:.0f}, {yt:.0f})")
-                if 200000 < xt < 800000 and 3600000 < yt < 3800000:
-                    print("  [OK] This looks reasonable!")
-                    if 397000 < xt < 401000 and 3701000 < yt < 3704000:
-                        print("  [OK] This matches expected coordinates!")
-            except Exception as e:
-                print(f"  Error: {e}")
-        
-        # Choose the best transformer
-        # Use calculated zone
-        epsg_code = 32600 + calculated_zone
-        print(f"\nUsing EPSG:{epsg_code} (UTM zone {calculated_zone}N)")
-        
+
+        # ASU Tempe is UTM zone 12N
         self.crs_wgs84 = pyproj.CRS("EPSG:4326")
-        self.crs_utm = pyproj.CRS(f"EPSG:{epsg_code}")
-        
+        self.crs_utm = pyproj.CRS("EPSG:32612")
         self.transformer_to_utm = pyproj.Transformer.from_crs(
-            self.crs_wgs84, 
-            self.crs_utm, 
-            always_xy=True
+            self.crs_wgs84, self.crs_utm, always_xy=True
         )
-        
         self.transformer_to_wgs84 = pyproj.Transformer.from_crs(
-            self.crs_utm, 
-            self.crs_wgs84, 
-            always_xy=True
+            self.crs_utm, self.crs_wgs84, always_xy=True
         )
-        
-        # Final verification
-        print("\nFinal verification:")
-        x_final, y_final = self.transformer_to_utm.transform(-111.9281, 33.4242)
-        print(f"ASU center (-111.9281, 33.4242) -> ({x_final:.0f}, {y_final:.0f})")
-        print(f"Expected: (~398500, ~3702500)")
-        
-        # ALWAYS use fallback for consistency since PyProj seems to have issues
-        print("Using fallback projection for consistency")
-        self.projection_ok = False
-        self.use_fallback = True
-        print("[OK] Fallback projection active (accurate within ~5m for campus area)")
-    
-    def project_to_utm(self, lon: float, lat: float) -> Tuple[float, float]:
-        """
-        Convert WGS84 (lat/lon) to UTM coordinates.
-        
-        Args:
-            lon: Longitude (e.g., -111.9281)
-            lat: Latitude (e.g., 33.4242)
-            
-        Returns:
-            (x, y) in UTM meters (easting, northing)
-        """
-        if hasattr(self, 'use_fallback') and self.use_fallback:
-            # Simple approximation for ASU area
-            # This is a linear approximation that's "good enough" for routing
-            # Center at ASU: -111.9281, 33.4242 -> approximately (398500, 3702500)
+
+        self.use_fallback = use_fallback
+        if not use_fallback:
+            x, y = self.transformer_to_utm.transform(-111.9281, 33.4242)
+            if not (410000 < x < 420000 and 3695000 < y < 3705000):
+                logger.warning(
+                    "UTM transform looks off for ASU center (%.0f, %.0f); enabling fallback",
+                    x,
+                    y,
+                )
+                self.use_fallback = True
+            else:
+                logger.info("Using EPSG:32612 (got ASU center ~%.0f, %.0f)", x, y)
+
+    def project_to_utm(self, lon: float, lat: float) -> tuple[float, float]:
+        if self.use_fallback:
             center_lon, center_lat = -111.9281, 33.4242
-            center_x, center_y = 398500, 3702500
-            
-            # Approximate conversion (meters per degree at this latitude)
-            # At lat 33.4°N:
-            # 1° longitude ≈ 92.6 km
-            # 1° latitude ≈ 111.0 km
-            meters_per_deg_lon = 92600
-            meters_per_deg_lat = 111000
-            
-            dx = (lon - center_lon) * meters_per_deg_lon
-            dy = (lat - center_lat) * meters_per_deg_lat
-            
-            x = center_x + dx
-            y = center_y + dy
+            center_x, center_y = 412900.0, 3702500.0
+            x = center_x + (lon - center_lon) * 92600.0
+            y = center_y + (lat - center_lat) * 111000.0
             return x, y
-        else:
-            # Use proper transformation
-            x, y = self.transformer_to_utm.transform(lon, lat)
-            return x, y
-    
-    def project_to_wgs84(self, x: float, y: float) -> Tuple[float, float]:
-        """
-        Convert UTM coordinates to WGS84 (lat/lon).
-        
-        Args:
-            x: UTM easting (meters)
-            y: UTM northing (meters)
-            
-        Returns:
-            (lon, lat) in decimal degrees
-        """
-        if hasattr(self, 'use_fallback') and self.use_fallback:
-            # Reverse of the fallback projection
+        return self.transformer_to_utm.transform(lon, lat)
+
+    def project_to_wgs84(self, x: float, y: float) -> tuple[float, float]:
+        if self.use_fallback:
             center_lon, center_lat = -111.9281, 33.4242
-            center_x, center_y = 398500, 3702500
-            
-            meters_per_deg_lon = 92600
-            meters_per_deg_lat = 111000
-            
-            dx = x - center_x
-            dy = y - center_y
-            
-            lon = center_lon + (dx / meters_per_deg_lon)
-            lat = center_lat + (dy / meters_per_deg_lat)
+            center_x, center_y = 412900.0, 3702500.0
+            lon = center_lon + (x - center_x) / 92600.0
+            lat = center_lat + (y - center_y) / 111000.0
             return lon, lat
-        else:
-            # Use proper transformation
-            lon, lat = self.transformer_to_wgs84.transform(x, y)
-            return lon, lat
-    
-    def create_synthetic_buildings(self, count: int = 20) -> List[Dict]:
-        """
-        Create synthetic building data for testing.
-        Distributes buildings across ASU campus.
-        
-        Args:
-            count: Number of buildings to create
-            
-        Returns:
-            List of building dicts with 'polygon', 'height', 'name'
-        """
+        return self.transformer_to_wgs84.transform(x, y)
+
+    def create_synthetic_buildings(self, count: int = 20) -> list[dict[str, Any]]:
         np.random.seed(42)
-        
-        buildings = []
-        
-        # Convert bounds to UTM
-        min_x, min_y = self.project_to_utm(self.bounds['min_lon'], self.bounds['min_lat'])
-        max_x, max_y = self.project_to_utm(self.bounds['max_lon'], self.bounds['max_lat'])
-        
-        print(f"Campus bounds in UTM: x=[{min_x:.0f}, {max_x:.0f}], y=[{min_y:.0f}, {max_y:.0f}]")
-        
-        # Create grid of buildings
+        buildings: list[dict[str, Any]] = []
+        min_x, min_y = self.project_to_utm(self.bounds["min_lon"], self.bounds["min_lat"])
+        max_x, max_y = self.project_to_utm(self.bounds["max_lon"], self.bounds["max_lat"])
         grid_size = int(np.sqrt(count))
         x_step = (max_x - min_x) / (grid_size + 1)
         y_step = (max_y - min_y) / (grid_size + 1)
-        
         building_id = 1
         for i in range(grid_size):
             for j in range(grid_size):
                 if building_id > count:
                     break
-                
-                # Center position
                 center_x = min_x + (i + 1) * x_step
                 center_y = min_y + (j + 1) * y_step
-                
-                # Random building size (20-50m)
                 width = np.random.uniform(20, 50)
                 length = np.random.uniform(20, 50)
-                
-                # Random rotation
-                angle = np.random.uniform(0, 90)
-                angle_rad = np.radians(angle)
-                
-                # Create rectangle
+                angle_rad = np.radians(np.random.uniform(0, 90))
                 corners = [
-                    (-width/2, -length/2),
-                    (width/2, -length/2),
-                    (width/2, length/2),
-                    (-width/2, length/2)
+                    (-width / 2, -length / 2),
+                    (width / 2, -length / 2),
+                    (width / 2, length / 2),
+                    (-width / 2, length / 2),
                 ]
-                
-                # Rotate and translate
-                rotated_corners = []
+                rotated = []
                 for x, y in corners:
                     x_rot = x * np.cos(angle_rad) - y * np.sin(angle_rad)
                     y_rot = x * np.sin(angle_rad) + y * np.cos(angle_rad)
-                    rotated_corners.append((
-                        center_x + x_rot,
-                        center_y + y_rot
-                    ))
-                
-                polygon = Polygon(rotated_corners)
-                
-                # Random height (10-30m, about 3-10 stories)
-                height = np.random.uniform(10, 30)
-                
-                buildings.append({
-                    'polygon': polygon,
-                    'height': height,
-                    'name': f'Building {building_id}',
-                    'id': building_id
-                })
-                
+                    rotated.append((center_x + x_rot, center_y + y_rot))
+                rotated.append(rotated[0])
+                buildings.append(
+                    {
+                        "polygon": Polygon(rotated),
+                        "height": float(np.random.uniform(10, 30)),
+                        "name": f"Building {building_id}",
+                        "id": building_id,
+                    }
+                )
                 building_id += 1
-        
-        print(f"Created {len(buildings)} synthetic buildings")
         return buildings
-    
-    def load_from_geojson(self, filepath: str) -> List[Dict]:
-        """
-        Load building data from GeoJSON file.
-        
-        Args:
-            filepath: Path to GeoJSON file
-            
-        Returns:
-            List of building dicts
-        """
-        buildings = []
-        
+
+    def load_from_geojson(self, filepath: str) -> list[dict[str, Any]]:
+        buildings: list[dict[str, Any]] = []
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
-            
-            print(f"Loading {len(data.get('features', []))} buildings from GeoJSON...")
-            
-            for idx, feature in enumerate(data['features']):
-                # Get geometry (in WGS84)
-                geom = shape(feature['geometry'])
-                
-                # Convert to UTM
-                def to_utm_func(x, y, z=None):
-                    # x=lon, y=lat in GeoJSON
-                    utm_x, utm_y = self.project_to_utm(x, y)
-                    return utm_x, utm_y
-                
+
+            features = data.get("features", [])
+            logger.info("Loading %s features from %s", len(features), filepath)
+
+            for idx, feature in enumerate(features):
+                geom = shape(feature["geometry"])
+                if geom.is_empty:
+                    continue
+
+                def to_utm_func(x: float, y: float, z: float | None = None) -> tuple[float, float]:
+                    return self.project_to_utm(x, y)
+
                 geom_utm = transform(to_utm_func, geom)
-                
-                # Get height
-                props = feature.get('properties', {})
-                height = props.get('height', props.get('building:levels', 3) * 3)
-                
-                buildings.append({
-                    'polygon': geom_utm,
-                    'height': float(height),
-                    'name': props.get('name', 'Unknown'),
-                    'id': props.get('id', idx)
-                })
-            
-            print(f"[OK] Loaded {len(buildings)} buildings from {filepath}")
-            
-            # Verify projection by checking first building
+                props = feature.get("properties", {}) or {}
+                height = _parse_building_height(props)
+                name = (
+                    props.get("name")
+                    or props.get("NAME")
+                    or props.get("BLDGID")
+                    or props.get("ID")
+                    or f"Building {idx}"
+                )
+                buildings.append(
+                    {
+                        "polygon": geom_utm,
+                        "height": float(height),
+                        "name": str(name),
+                        "id": props.get("id", props.get("OBJECTID", idx)),
+                    }
+                )
+
             if buildings:
-                first = buildings[0]
-                bounds = first['polygon'].bounds
-                print(f"   Sample building bounds (UTM): x=[{bounds[0]:.0f}, {bounds[2]:.0f}], y=[{bounds[1]:.0f}, {bounds[3]:.0f}]")
-            
+                heights = [b["height"] for b in buildings]
+                logger.info(
+                    "Loaded %s buildings (height min=%.1f mean=%.1f max=%.1f)",
+                    len(buildings),
+                    min(heights),
+                    sum(heights) / len(heights),
+                    max(heights),
+                )
             return buildings
-            
         except FileNotFoundError:
-            print(f"[ERROR] File not found: {filepath}")
+            logger.error("Building GeoJSON not found: %s", filepath)
             return []
-        except Exception as e:
-            print(f"[ERROR] Error loading GeoJSON: {e}")
-            import traceback
-            traceback.print_exc()
+        except Exception as exc:
+            logger.exception("Error loading GeoJSON %s: %s", filepath, exc)
             return []
-    
-    def save_to_geojson(self, buildings: List[Dict], filepath: str):
-        """
-        Save buildings to GeoJSON file (in WGS84).
-        
-        Args:
-            buildings: List of building dicts
-            filepath: Output filepath
-        """
+
+    def load_canopy_from_geojson(self, filepath: str) -> list[dict[str, Any]]:
+        """Load canopy crown polygons (same shape contract as buildings)."""
+        path = Path(filepath)
+        if not path.exists():
+            logger.info("No canopy GeoJSON at %s (trees not loaded)", filepath)
+            return []
+        items = self.load_from_geojson(str(path))
+        for item in items:
+            item["kind"] = "canopy"
+        logger.info("Loaded %s canopy crowns", len(items))
+        return items
+
+    def save_to_geojson(self, buildings: list[dict[str, Any]], filepath: str) -> None:
         features = []
-        
-        def to_wgs84_func(x, y, z=None):
-            lon, lat = self.project_to_wgs84(x, y)
-            return lon, lat
-        
+
+        def to_wgs84_func(x: float, y: float, z: float | None = None) -> tuple[float, float]:
+            return self.project_to_wgs84(x, y)
+
         for building in buildings:
-            polygon_wgs84 = transform(to_wgs84_func, building['polygon'])
-            
-            feature = {
-                'type': 'Feature',
-                'geometry': mapping(polygon_wgs84),
-                'properties': {
-                    'height': building['height'],
-                    'name': building['name'],
-                    'id': building.get('id', 0)
+            polygon_wgs84 = transform(to_wgs84_func, building["polygon"])
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": mapping(polygon_wgs84),
+                    "properties": {
+                        "height": building["height"],
+                        "name": building["name"],
+                        "id": building.get("id", 0),
+                    },
                 }
-            }
-            features.append(feature)
-        
-        geojson = {
-            'type': 'FeatureCollection',
-            'features': features
-        }
-        
+            )
+
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(filepath, 'w') as f:
-            json.dump(geojson, f, indent=2)
-        
-        print(f"Saved {len(buildings)} buildings to {filepath}")
-    
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump({"type": "FeatureCollection", "features": features}, f, indent=2)
+
     def get_buildings_in_bounds(
         self,
-        buildings: List[Dict],
+        buildings: list[dict[str, Any]],
         min_lat: float,
         max_lat: float,
         min_lon: float,
-        max_lon: float
-    ) -> List[Dict]:
-        """
-        Filter buildings within bounding box.
-        
-        Args:
-            buildings: List of buildings
-            min_lat, max_lat, min_lon, max_lon: Bounding box in WGS84
-            
-        Returns:
-            Filtered list of buildings
-        """
-        # Convert bounds to UTM
+        max_lon: float,
+    ) -> list[dict[str, Any]]:
         min_x, min_y = self.project_to_utm(min_lon, min_lat)
         max_x, max_y = self.project_to_utm(max_lon, max_lat)
-        
-        bbox = Polygon([
-            (min_x, min_y),
-            (max_x, min_y),
-            (max_x, max_y),
-            (min_x, max_y)
-        ])
-        
-        filtered = []
-        for building in buildings:
-            if building['polygon'].intersects(bbox):
-                filtered.append(building)
-        
-        return filtered
-
-
-# Test and example usage
-if __name__ == "__main__":
-    print("Building Data Loader Test\n" + "="*50)
-    
-    loader = BuildingDataLoader()
-    
-    print("\n" + "="*50)
-    print("Testing projection:")
-    x, y = loader.project_to_utm(-111.9281, 33.4242)
-    print(f"ASU center: ({x:.0f}, {y:.0f})")
-    print("Expected: (~398500, ~3702500)")
-    if 397000 < x < 401000 and 3701000 < y < 3704000:
-        print("[OK] CORRECT!")
-    else:
-        print("[ERROR] WRONG!")
+        out: list[dict[str, Any]] = []
+        for b in buildings:
+            minx, miny, maxx, maxy = b["polygon"].bounds
+            if not (maxx < min_x or minx > max_x or maxy < min_y or miny > max_y):
+                out.append(b)
+        return out

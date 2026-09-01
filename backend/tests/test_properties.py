@@ -5,7 +5,6 @@ import hypothesis.strategies as st
 from fastapi.testclient import TestClient
 from hypothesis import given, settings
 from shapely.geometry import LineString
-from shapely.ops import transform
 from shapely.wkt import loads as wkt_loads
 
 os.environ["SKIP_DATA_LOADING"] = "1"
@@ -13,7 +12,6 @@ os.environ["SKIP_DATA_LOADING"] = "1"
 from src import api
 from src.database import get_session
 from src.models import BuildingFootprint
-
 
 client = TestClient(api.app)
 
@@ -68,11 +66,25 @@ def test_shade_route_exposure_not_worse_than_fastest(pair):
     end = {"lat": float(g.nodes[n2]["y"]), "lon": float(g.nodes[n2]["x"])}
     fast = client.post(
         "/route",
-        json={"start": start, "end": end, "time_of_day": 12, "day_of_year": 180, "optimize_for": "speed", "shade_weight": 0.0},
+        json={
+            "start": start,
+            "end": end,
+            "time_of_day": 12,
+            "day_of_year": 180,
+            "optimize_for": "speed",
+            "shade_weight": 0.0,
+        },
     )
     shade = client.post(
         "/route",
-        json={"start": start, "end": end, "time_of_day": 12, "day_of_year": 180, "optimize_for": "shade", "shade_weight": 0.7},
+        json={
+            "start": start,
+            "end": end,
+            "time_of_day": 12,
+            "day_of_year": 180,
+            "optimize_for": "shade",
+            "shade_weight": 0.7,
+        },
     )
     if fast.status_code != 200 or shade.status_code != 200:
         return
@@ -90,7 +102,14 @@ def test_route_length_matches_segment_sum(pair):
     end = {"lat": float(g.nodes[n2]["y"]), "lon": float(g.nodes[n2]["x"])}
     response = client.post(
         "/route",
-        json={"start": start, "end": end, "time_of_day": 12, "day_of_year": 180, "optimize_for": "shade", "shade_weight": 0.7},
+        json={
+            "start": start,
+            "end": end,
+            "time_of_day": 12,
+            "day_of_year": 180,
+            "optimize_for": "shade",
+            "shade_weight": 0.7,
+        },
     )
     if response.status_code != 200:
         return
@@ -110,7 +129,14 @@ def test_route_points_are_connected(pair):
     end = {"lat": float(g.nodes[n2]["y"]), "lon": float(g.nodes[n2]["x"])}
     response = client.post(
         "/route",
-        json={"start": start, "end": end, "time_of_day": 12, "day_of_year": 180, "optimize_for": "speed", "shade_weight": 0.0},
+        json={
+            "start": start,
+            "end": end,
+            "time_of_day": 12,
+            "day_of_year": 180,
+            "optimize_for": "speed",
+            "shade_weight": 0.0,
+        },
     )
     if response.status_code != 200:
         return

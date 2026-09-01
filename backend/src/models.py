@@ -1,6 +1,6 @@
 """ORM and API models used by the live OSM routing pipeline."""
 
-from typing import List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 from sqlalchemy import Float, Index, Integer, LargeBinary, String
@@ -42,7 +42,8 @@ class OSMEdgeShadeIndex(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     day_of_year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     edge_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    time_bucket: Mapped[int] = mapped_column(Integer, nullable=False, index=True)  # minutes from midnight, step=5
+    # minutes from midnight, step=5
+    time_bucket: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     shade_fraction: Mapped[float] = mapped_column(Float, nullable=False)
 
 
@@ -58,7 +59,8 @@ class RouteRequest(BaseModel):
     day_of_year: float = Field(default=180, ge=0, le=365)
     optimize_for: str = Field(default="shade", pattern="^(shade|speed)$")
     shade_weight: float = Field(default=0.7, ge=0, le=1)
-    waypoints: Optional[List[Location]] = None
+    waypoints: list[Location] | None = None
+    calendar_date: str | None = None
 
 
 class RouteSegment(BaseModel):
@@ -70,13 +72,14 @@ class RouteSegment(BaseModel):
 
 
 class RouteResponse(BaseModel):
-    segments: List[RouteSegment]
+    segments: list[RouteSegment]
     total_distance: float
     average_shade: float
     total_time_minutes: float
-    path_coordinates: List[List[float]]
-    polyline_coordinates: List[List[float]]
-    edge_geometries: List[List[List[float]]]
-    edge_ids: List[str]
-    comparison: Optional[dict] = None
-    fastest_segments: Optional[List[RouteSegment]] = None
+    path_coordinates: list[list[float]]
+    polyline_coordinates: list[list[float]]
+    edge_geometries: list[list[list[float]]]
+    edge_ids: list[str]
+    comparison: dict[str, Any] | None = None
+    fastest_segments: list[RouteSegment] | None = None
+    fastest_polyline_coordinates: list[list[float]] | None = None

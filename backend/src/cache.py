@@ -7,9 +7,9 @@ import os
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
-import redis
+from redis import Redis
 
 
 @dataclass
@@ -21,20 +21,22 @@ class CacheEntry:
 class RouteCache:
     """Two-tier route cache.
 
-    Staleness tradeoff: quantized origin/destination/time buckets improve hit rate for near-identical queries,
+    Staleness tradeoff: quantized origin/destination/time buckets improve hit rate for
+    near-identical queries,
     but can return slightly different routes than exact-point recomputation.
     """
 
-    def __init__(self, max_items: int = 5000, ttl_seconds: int = 300):
+    def __init__(self, max_items: int = 5000, ttl_seconds: int = 300) -> None:
         self.max_items = max_items
         self.ttl_seconds = ttl_seconds
         self._memory: OrderedDict[str, CacheEntry] = OrderedDict()
-        self._redis = None
+        self._redis: Redis[str] | None = None
         redis_url = os.getenv("REDIS_URL")
         if redis_url:
             try:
-                self._redis = redis.from_url(redis_url, decode_responses=True)
-                self._redis.ping()
+                client: Redis[str] = Redis.from_url(redis_url, decode_responses=True)
+                client.ping()
+                self._redis = client
             except Exception:
                 self._redis = None
 
@@ -59,9 +61,12 @@ class RouteCache:
         e_lon = self.quantize(end_lon, 0.0005)
         time_bucket = int(minutes / 5) * 5
         weight_bucket = self.quantize(shade_weight, 0.05)
-        return f"{s_lat}:{s_lon}:{e_lat}:{e_lon}:{time_bucket}:{day_of_year}:{optimize_for}:{weight_bucket}"
+        return (
+            f"{s_lat}:{s_lon}:{e_lat}:{e_lon}:{time_bucket}:"
+            f"{day_of_year}:{optimize_for}:{weight_bucket}"
+        )
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         now = time.time()
         if self._redis:
             raw = self._redis.get(key)

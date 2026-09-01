@@ -6,22 +6,31 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import Callable
+from typing import Any, cast
 
 import structlog
 from fastapi import Request, Response
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from starlette.responses import Response as StarletteResponse
 
 request_id_ctx: ContextVar[str] = ContextVar("request_id", default="")
 tracer = trace.get_tracer("campusshade.route")
 
-REQUEST_COUNT = Counter("campusshade_requests_total", "Total request count", ["path", "method", "status"])
-REQUEST_LATENCY = Histogram("campusshade_request_latency_seconds", "Request latency", ["path", "method"])
+REQUEST_COUNT = Counter(
+    "campusshade_requests_total",
+    "Total request count",
+    ["path", "method", "status"],
+)
+REQUEST_LATENCY = Histogram(
+    "campusshade_request_latency_seconds",
+    "Request latency",
+    ["path", "method"],
+)
 ROUTE_DISTANCE = Histogram("campusshade_route_distance_meters", "Route distance distribution")
 CACHE_HIT_RATE = Counter("campusshade_route_cache_total", "Route cache events", ["result"])
 
@@ -49,7 +58,10 @@ async def metrics_endpoint() -> StarletteResponse:
     return StarletteResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-async def request_middleware(request: Request, call_next: Callable) -> Response:
+async def request_middleware(
+    request: Request,
+    call_next: Callable[..., Awaitable[Any]],
+) -> Response:
     request_id = str(uuid.uuid4())
     request_id_ctx.set(request_id)
     start = time.perf_counter()
@@ -58,7 +70,11 @@ async def request_middleware(request: Request, call_next: Callable) -> Response:
         span.set_attribute("request.id", request_id)
         response = await call_next(request)
     elapsed = time.perf_counter() - start
-    REQUEST_COUNT.labels(path=request.url.path, method=request.method, status=str(response.status_code)).inc()
+    REQUEST_COUNT.labels(
+        path=request.url.path,
+        method=request.method,
+        status=str(response.status_code),
+    ).inc()
     REQUEST_LATENCY.labels(path=request.url.path, method=request.method).observe(elapsed)
     response.headers["X-Request-ID"] = request_id
-    return response
+    return cast(Response, response)

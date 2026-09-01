@@ -4,14 +4,14 @@ Requires: geopandas, shapely, pvlib, pytz
 """
 
 import logging
-import numpy as np
-import pandas as pd
-from datetime import datetime, timedelta
-from typing import List, Tuple, Dict, Optional
-import pytz
-from shapely.geometry import Polygon, MultiPolygon, LineString, Point
-from shapely.ops import unary_union
 import math
+from datetime import datetime
+from typing import Any
+
+import pandas as pd
+import pytz
+from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.ops import unary_union
 
 # pvlib for solar position
 try:
@@ -24,7 +24,7 @@ except ImportError:
 class ShadowCalculator:
     """Calculate building shadows based on sun position."""
     
-    def __init__(self, timezone='America/Phoenix'):
+    def __init__(self, timezone: str = "America/Phoenix") -> None:
         """
         Initialize shadow calculator.
         
@@ -37,7 +37,7 @@ class ShadowCalculator:
         self.longitude = -111.9281
         self.logger = logging.getLogger("uvicorn.error")
         
-    def get_sun_position(self, dt: datetime) -> Tuple[float, float]:
+    def get_sun_position(self, dt: datetime) -> tuple[float, float]:
         """
         Calculate sun azimuth and elevation for given time.
         
@@ -86,7 +86,7 @@ class ShadowCalculator:
         building_height: float,
         azimuth: float,
         elevation: float
-    ) -> Optional[Polygon]:
+    ) -> Polygon | None:
         """
         Calculate ground shadow cast by a building.
         
@@ -99,59 +99,40 @@ class ShadowCalculator:
         Returns:
             Shadow polygon or None if sun is below horizon
         """
-        # No shadow if sun is below horizon
-        if elevation <= 0:
+        # No useful ground shadow when the sun is down or barely above the horizon.
+        # Very low elevation makes each building a multi-block black streak.
+        if elevation < 8:
             return None
-        
-        # Calculate shadow length
-        # L = h / tan(elevation)
+
         shadow_length = building_height / math.tan(math.radians(elevation))
-        
-        # Cap extreme shadows at low sun angles
-        shadow_length = min(shadow_length, 2000)  # Max 2km
-        
-        # Convert azimuth to shadow direction
-        # Shadow points away from sun (opposite direction)
+        shadow_length = min(shadow_length, 120.0)
+        if shadow_length < 1.0:
+            return None
+
         shadow_direction = (azimuth + 180) % 360
-        
-        # Convert to cartesian offset
-        # Note: 0° = North = +Y, 90° = East = +X
         dx = shadow_length * math.sin(math.radians(shadow_direction))
         dy = shadow_length * math.cos(math.radians(shadow_direction))
-        
-        # Translate building footprint
+
         from shapely.affinity import translate
-        shadow_footprint = translate(building_polygon, xoff=dx, yoff=dy)
-        
-        # Create shadow polygon by connecting building and shadow footprints
-        # Get exterior coordinates
-        building_coords = list(building_polygon.exterior.coords)
-        shadow_coords = list(shadow_footprint.exterior.coords)
-        
-        # Create quadrilaterals for each edge
-        shadow_parts = []
-        for i in range(len(building_coords) - 1):
-            quad = Polygon([
-                building_coords[i],
-                building_coords[i + 1],
-                shadow_coords[i + 1],
-                shadow_coords[i]
-            ])
-            shadow_parts.append(quad)
-        
-        # Also include the translated building footprint
-        shadow_parts.append(shadow_footprint)
-        
-        # Union all parts
-        try:
-            shadow = unary_union(shadow_parts)
-            return shadow
-        except:
+        footprint = building_polygon.buffer(0)
+        if footprint.is_empty:
             return None
+        cast = translate(footprint, xoff=dx, yoff=dy)
+        try:
+            shadow = unary_union([footprint, cast]).convex_hull
+        except Exception as exc:
+            self.logger.warning("shadow union failed: %s", exc)
+            return None
+        if shadow.is_empty or not shadow.is_valid:
+            return None
+        # Reject outliers that still cover far more ground than the building.
+        if footprint.area > 0 and shadow.area > footprint.area * 40:
+            return None
+        return shadow
     
     def calculate_all_shadows(
         self,
-        buildings: List[Dict],
+        buildings: list[dict[str, Any]],
         dt: datetime
     ) -> Polygon:
         """
@@ -167,7 +148,9 @@ class ShadowCalculator:
         # Get sun position
         azimuth, elevation = self.get_sun_position(dt)
         
-        shadow_polygons = self.calculate_shadow_polygons(buildings, dt, azimuth=azimuth, elevation=elevation)
+        shadow_polygons = self.calculate_shadow_polygons(
+            buildings, dt, azimuth=azimuth, elevation=elevation
+        )
         
         # Union all shadows
         if shadow_polygons:
@@ -178,11 +161,11 @@ class ShadowCalculator:
 
     def calculate_shadow_polygons(
         self,
-        buildings: List[Dict],
+        buildings: list[dict[str, Any]],
         dt: datetime,
-        azimuth: Optional[float] = None,
-        elevation: Optional[float] = None,
-    ) -> List[Polygon]:
+        azimuth: float | None = None,
+        elevation: float | None = None,
+    ) -> list[Polygon]:
         """Calculate one shadow geometry per building footprint."""
         if azimuth is None or elevation is None:
             azimuth, elevation = self.get_sun_position(dt)
@@ -193,7 +176,7 @@ class ShadowCalculator:
             elevation,
         )
 
-        shadows: List[Polygon] = []
+        shadows: list[Polygon] = []
         for building in buildings:
             polygon = building.get("polygon")
             if polygon is None or polygon.is_empty:
@@ -257,7 +240,7 @@ class ShadowCalculator:
                 return 0.0
             
             shade_fraction = min(shaded_length / total_length, 1.0)
-            return shade_fraction
+            return float(shade_fraction)
             
         except Exception as e:
             print(f"Error calculating street shade: {e}")

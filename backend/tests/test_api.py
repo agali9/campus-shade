@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 os.environ["SKIP_DATA_LOADING"] = "1"
 from src import api
 
-
 client = TestClient(api.app)
 
 
@@ -47,8 +46,9 @@ def test_shadows_endpoint_returns_geojson_feature():
     response = client.get("/shadows?hour=12&day=180")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["type"] == "Feature"
-    assert payload["geometry"]["type"] in {"Polygon", "MultiPolygon"}
+    assert payload["type"] == "FeatureCollection"
+    assert "features" in payload
+    assert isinstance(payload["features"], list)
 
 
 def test_route_returns_503_when_router_unavailable():

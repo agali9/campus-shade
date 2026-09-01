@@ -1,8 +1,8 @@
 import os
 import time
 
-from fastapi.testclient import TestClient
 import networkx as nx
+from fastapi.testclient import TestClient
 from shapely.geometry import LineString
 
 os.environ["SKIP_DATA_LOADING"] = "1"
@@ -27,7 +27,10 @@ def _seed_minimal_fixture() -> nx.MultiDiGraph:
                 max_lat=33.4245,
                 min_lon=-111.9280,
                 max_lon=-111.9277,
-                geom_wkt="POLYGON((-111.9280 33.4243,-111.9277 33.4243,-111.9277 33.4245,-111.9280 33.4245,-111.9280 33.4243))",
+                geom_wkt=(
+                    "POLYGON((-111.9280 33.4243,-111.9277 33.4243,"
+                    "-111.9277 33.4245,-111.9280 33.4245,-111.9280 33.4243))"
+                ),
             )
         )
         session.commit()
